@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Plan {
+  FREE
+  PRO
+  TEAM
+}
+
+enum ReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum FindingSeverity {
+  ERROR
+  WARNING
+  INFO
+}
+
+model User {
+  id            String   @id @default(uuid())
+  githubId      Int      @unique
+  login         String
+  name          String?
+  email         String?
+  avatarUrl     String?
+  plan          Plan     @default(FREE)
+  reviewsUsed   Int      @default(0)
+  reviewsLimit  Int      @default(50)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  repositories Repository[]
+  reviews      Review[]
+}
+
+model Repository {
+  id        String   @id @default(uuid())
+  githubId  Int      @unique
+  name      String
+  fullName  String
+  owner     String
+  private   Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId  String
+  user    User     @relation(fields: [userId], references: [id])
+  reviews Review[]
+}
+
+model Review {
+  id            String         @id @default(uuid())
+  prNumber      Int
+  prTitle       String
+  status        ReviewStatus   @default(PENDING)
+  diffUrl       String?
+  qualityScore  Int?
+  findingsCount Int?
+  createdAt     DateTime       @default(now())
+  completedAt   DateTime?
+
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id])
+
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+
+  findings Finding[]
+}
+
+model Finding {
+  id          String          @id @default(uuid())
+  severity    FindingSeverity
+  title       String
+  description String
+  filePath    String?
+  lineStart   Int?
+  lineEnd     Int?
+  suggestion  String?
+  createdAt   DateTime        @default(now())
+
+  reviewId String
+  review   Review @relation(fields: [reviewId], references: [id])
+}

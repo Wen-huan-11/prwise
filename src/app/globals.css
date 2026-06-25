@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
+  --color-brand-950: #022c22;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* { font-family: var(--font-sans); }
+.font-mono { font-family: var(--font-mono) !important; }
+html { scroll-behavior: smooth; }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 300px; }
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #10b981, #34d399, #6ee7b7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.glow { box-shadow: 0 0 40px rgba(16, 185, 129, 0.15); }
+.code-bg { background: #0f172a; }
+.diff-add { background: rgba(16, 185, 129, 0.15); border-left: 3px solid #10b981; }
+.diff-remove { background: rgba(239, 68, 68, 0.15); border-left: 3px solid #ef4444; }
+
+.review-item { animation: fadeInUp 0.4s ease forwards; opacity: 0; }
+.review-item:nth-child(1) { animation-delay: 0.1s; }
+.review-item:nth-child(2) { animation-delay: 0.3s; }
+.review-item:nth-child(3) { animation-delay: 0.5s; }
+.review-item:nth-child(4) { animation-delay: 0.7s; }
+
+::selection { background: rgba(16, 185, 129, 0.3); color: #fff; }
