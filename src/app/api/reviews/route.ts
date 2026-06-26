@@ -12,17 +12,37 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const body = await request.json();
+
+  // ── Demo mode: review a raw code snippet (no auth required) ──
+  if (body.code && typeof body.code === 'string') {
+    try {
+      const result = await reviewDiff(body.code, true, body.lang ?? 'zh');
+      return NextResponse.json({
+        status: 'COMPLETED',
+        qualityScore: result.qualityScore,
+        summary: result.summary,
+        findingsCount: result.findings.length,
+        findings: result.findings,
+      });
+    } catch (err) {
+      return NextResponse.json({
+        error: err instanceof Error ? err.message : 'Review failed',
+      }, { status: 500 });
+    }
+  }
+
+  // ── PR URL mode (requires login) ──
   const session = await getServerSession(authOptions);
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const body = await request.json();
   const { prUrl } = body;
 
   if (!prUrl || typeof prUrl !== 'string') {
-    return NextResponse.json({ error: 'Missing prUrl' }, { status: 400 });
+    return NextResponse.json({ error: 'Missing prUrl or code' }, { status: 400 });
   }
 
   const match = prUrl.match(PR_URL_PATTERN);

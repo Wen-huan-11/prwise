@@ -4,46 +4,70 @@ import { useState } from 'react';
 import { useLang } from '@/context/LangContext';
 
 interface Finding {
-  severity: 'error' | 'warning' | 'info';
-  titleKey: string;
-  descKey: string;
+  severity: 'ERROR' | 'WARNING' | 'INFO';
+  title: string;
+  description: string;
+  filePath: string | null;
+  lineStart: number | null;
+  lineEnd: number | null;
+  suggestion: string | null;
 }
 
-const findings: Finding[] = [
-  { severity: 'error', titleKey: 'demo_finding_1_title', descKey: 'demo_finding_1_desc' },
-  { severity: 'warning', titleKey: 'demo_finding_2_title', descKey: 'demo_finding_2_desc' },
-  { severity: 'info', titleKey: 'demo_finding_3_title', descKey: 'demo_finding_3_desc' },
-];
+interface ReviewResponse {
+  status: string;
+  qualityScore: number;
+  summary: string;
+  findingsCount: number;
+  findings: Finding[];
+}
 
-const severityStyles = {
-  error: { icon: '✕', border: 'border-red-500/20', bg: 'bg-red-500/5', titleClass: 'text-red-300', iconClass: 'text-red-400' },
-  warning: { icon: '⚠', border: 'border-yellow-500/20', bg: 'bg-yellow-500/5', titleClass: 'text-yellow-300', iconClass: 'text-yellow-400' },
-  info: { icon: '✓', border: 'border-green-500/20', bg: 'bg-green-500/5', titleClass: 'text-green-300', iconClass: 'text-green-400' },
+const severityStyles: Record<string, { icon: string; border: string; bg: string; titleClass: string; iconClass: string }> = {
+  ERROR: { icon: '✕', border: 'border-red-500/20', bg: 'bg-red-500/5', titleClass: 'text-red-300', iconClass: 'text-red-400' },
+  WARNING: { icon: '⚠', border: 'border-yellow-500/20', bg: 'bg-yellow-500/5', titleClass: 'text-yellow-300', iconClass: 'text-yellow-400' },
+  INFO: { icon: '✓', border: 'border-green-500/20', bg: 'bg-green-500/5', titleClass: 'text-green-300', iconClass: 'text-green-400' },
 };
 
 export default function InteractiveDemo() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [code, setCode] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [statusText, setStatusText] = useState('');
+  const [result, setResult] = useState<ReviewResponse | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const sampleCode = `function getUser(id) {\n  const data = fetch(\`/users/\${id}\`);\n  return data.json();\n}`;
+  const sampleCode = `function getUser(id) {
+  const data = fetch(\`/users/\${id}\`);
+  return data.json();
+}`;
 
   const loadSample = () => setCode(sampleCode);
 
-  const startReview = () => {
+  const startReview = async () => {
+    if (!code.trim()) return;
     setStatus('loading');
-    setStatusText('Parsing code diff...');
-    const steps = [
-      { delay: 400, text: 'Analyzing logic flow...' },
-      { delay: 900, text: 'Checking for security issues...' },
-      { delay: 1400, text: 'Evaluating code quality...' },
-      { delay: 2000, text: '' },
-    ];
-    steps.forEach((s) => {
-      setTimeout(() => setStatusText(s.text), s.delay);
-    });
-    setTimeout(() => setStatus('done'), 2400);
+    setStatusText('Parsing code...');
+    setErrorMsg('');
+    setResult(null);
+
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, lang }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const data: ReviewResponse = await res.json();
+      setResult(data);
+      setStatus('done');
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
+    }
   };
 
   return (
@@ -106,10 +130,26 @@ export default function InteractiveDemo() {
                   </div>
                 </div>
               )}
-              {status === 'done' && (
+              {status === 'error' && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                  <div className="text-red-300 text-sm font-medium">审查失败</div>
+                  <div className="text-xs text-slate-500 mt-1">{errorMsg}</div>
+                </div>
+              )}
+              {status === 'done' && result && (
                 <div className="space-y-2">
-                  {findings.map((f, i) => {
-                    const s = severityStyles[f.severity];
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-slate-500">质量评分</span>
+                    <span className="text-sm font-bold text-brand-300">{result.qualityScore}/100</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mb-3">{result.summary}</p>
+                  {result.findings.length === 0 && (
+                    <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                      <div className="text-green-300 text-sm">✓ 未发现问题，代码质量很好！</div>
+                    </div>
+                  )}
+                  {result.findings.map((f, i) => {
+                    const s = severityStyles[f.severity] || severityStyles.INFO;
                     return (
                       <div
                         key={i}
@@ -117,9 +157,12 @@ export default function InteractiveDemo() {
                         style={{ borderColor: s.border.replace('border-', ''), background: s.bg.replace('bg-', '') }}
                       >
                         <span className={`${s.iconClass} shrink-0 mt-0.5 font-bold`}>{s.icon}</span>
-                        <div>
-                          <div className={`${s.titleClass} font-medium text-sm`}>{t(f.titleKey)}</div>
-                          <div className="text-xs text-slate-500 mt-0.5">{t(f.descKey)}</div>
+                        <div className="min-w-0">
+                          <div className={`${s.titleClass} font-medium text-sm`}>{f.title}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">{f.description}</div>
+                          {f.suggestion && (
+                            <div className="text-xs text-slate-400 mt-1">💡 {f.suggestion}</div>
+                          )}
                         </div>
                       </div>
                     );
