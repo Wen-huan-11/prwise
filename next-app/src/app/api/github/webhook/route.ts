@@ -126,26 +126,49 @@ export async function POST(request: Request) {
           logger(`Created repository ${data.repository.full_name}`);
         }
 
-        // ── 3. Create Review record ──
-        const review = await prisma.review.create({
-          data: {
-            prNumber: pr.number,
-            prTitle: pr.title,
-            status: 'IN_PROGRESS',
-            repositoryId: repository.id,
-            userId: user.id,
-          },
+        // ── 3. Check for existing review (idempotency for webhook retries) ──
+        const existingReview = await prisma.review.findFirst({
+          where: { prNumber: pr.number, repositoryId: repository.id },
+          orderBy: { createdAt: 'desc' },
         });
-        logger(`Created review for PR #${pr.number}`);
 
-        // ── 4. Fetch diff and run AI review ──
+        if (existingReview && existingReview.status === 'COMPLETED') {
+          logger(`PR #${pr.number} already reviewed, skipping (webhook retry)`);
+          return NextResponse.json({ ok: true, skipped: true });
+        }
+
+        // ── 4. Create or reuse Review record ──
+        const review = existingReview && existingReview.status === 'FAILED'
+          ? existingReview
+          : await prisma.review.create({
+              data: {
+                prNumber: pr.number,
+                prTitle: pr.title,
+                status: 'IN_PROGRESS',
+                repositoryId: repository.id,
+                userId: user.id,
+              },
+            });
+
+        // Reset if reusing a failed review
+        if (review.status === 'FAILED') {
+          await prisma.review.update({
+            where: { id: review.id },
+            data: { status: 'IN_PROGRESS', findingsCount: 0, qualityScore: null, completedAt: null },
+          });
+        }
+
+        logger(`Processing review ${review.id} for PR #${pr.number}`);
+
+        // ── 5. Fetch diff and run AI review ──
         const diff = await fetchPullRequestDiff(owner, repo, pr.number);
         logger(`Fetched diff for PR #${pr.number}: ${diff.length} bytes`);
 
         const result = await reviewDiff(diff);
         logger(`AI review completed: ${result.findings.length} findings, score=${result.qualityScore}`);
 
-        // ── 5. Save findings to database ──
+        // ── 6. Save findings (delete old ones first if retry) ──
+        await prisma.finding.deleteMany({ where: { reviewId: review.id } });
         const findings = await Promise.all(
           result.findings.map((f) =>
             prisma.finding.create({
@@ -163,12 +186,12 @@ export async function POST(request: Request) {
           )
         );
 
-        // ── 6. Post review results to GitHub PR BEFORE marking complete ──
+        // ── 7. Post review results to GitHub PR BEFORE marking complete ──
         const commentBody = formatReviewComment(result, pr.title);
         await postPRReviewComment(owner, repo, pr.number, commentBody);
         logger(`Posted review comment to PR #${pr.number}`);
 
-        // ── 7. Only now mark review as COMPLETED ──
+        // ── 8. Only now mark review as COMPLETED ──
         await prisma.review.update({
           where: { id: review.id },
           data: {
