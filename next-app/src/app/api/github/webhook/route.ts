@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { fetchPullRequestDiff, postPRReviewComment } from '@/lib/github';
 import { reviewDiff, ReviewResult } from '@/lib/ai';
@@ -7,9 +7,11 @@ import { reviewDiff, ReviewResult } from '@/lib/ai';
 function verifySignature(payload: string, signature: string | null, secret: string): boolean {
   if (!signature) return false;
   const algo = signature.startsWith('sha256=') ? 'sha256' : 'sha1';
-  const expected = algo === 'sha256' ? 'sha256=' : 'sha1=';
+  const prefix = algo === 'sha256' ? 'sha256=' : 'sha1=';
   const hmac = createHmac(algo, secret).update(payload).digest('hex');
-  return signature === expected + hmac;
+  const expected = prefix + hmac;
+  if (signature.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
 
 function logger(message: string, data?: unknown) {
