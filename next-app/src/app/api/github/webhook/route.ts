@@ -71,160 +71,179 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  if (event === 'pull_request') {
-    const data = JSON.parse(text);
-    const action = data.action;
-    const pr = data.pull_request;
+  logger(`Received event: ${event}`);
 
-    if (action === 'opened' || action === 'synchronize') {
-      const [owner, repo] = data.repository.full_name.split('/');
-      let sender = data.sender;
+  if (event !== 'pull_request') {
+    return NextResponse.json({ ok: true });
+  }
 
-      logger(`PR #${pr.number} ${action} in ${data.repository.full_name}`);
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    logger('Failed to parse webhook payload as JSON');
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
 
-      try {
-        // ── 0. Handle bot-triggered events (GitHub Actions, etc.) ──
-        if (sender.type === 'Bot') {
-          sender = data.repository.owner;
-          logger(`Bot sender detected, falling back to repo owner: ${sender.login}`);
-        }
+  const action = data.action as string | undefined;
+  const pr = data.pull_request;
 
-        // ── 1. Find or create user ──
-        let user = await prisma.user.findUnique({
-          where: { githubId: sender.id },
-        });
+  if (!pr || !action) {
+    logger('Missing pull_request or action in webhook payload');
+    return NextResponse.json({ error: 'Missing pull_request or action' }, { status: 400 });
+  }
 
-        if (!user) {
-          user = await prisma.user.create({
-            data: {
-              githubId: sender.id,
-              login: sender.login,
-              name: sender.login,
-              email: '',
-              avatarUrl: sender.avatar_url ?? '',
-            },
-          });
-          logger(`Created user ${sender.login}`);
-        }
+  if (action !== 'opened' && action !== 'synchronize') {
+    logger(`Unhandled pull_request action: ${action}`);
+    return NextResponse.json({ ok: true });
+  }
 
-        // ── 2. Find or create repository ──
-        let repository = await prisma.repository.findFirst({
-          where: { fullName: data.repository.full_name },
-        });
+  const [owner, repo] = data.repository.full_name.split('/');
+  let sender = data.sender;
 
-        if (!repository) {
-          repository = await prisma.repository.create({
-            data: {
-              githubId: data.repository.id,
-              name: repo,
-              fullName: data.repository.full_name,
-              owner,
-              private: data.repository.private,
-              userId: user.id,
-            },
-          });
-          logger(`Created repository ${data.repository.full_name}`);
-        }
+  logger(`PR #${pr.number} ${action} in ${data.repository.full_name}`);
 
-        // ── 3. Check for existing review (idempotency for webhook retries) ──
-        const existingReview = await prisma.review.findFirst({
-          where: { prNumber: pr.number, repositoryId: repository.id },
-          orderBy: { createdAt: 'desc' },
-        });
+  try {
+    // ── 0. Handle bot-triggered events (GitHub Actions, etc.) ──
+    if (sender.type === 'Bot') {
+      sender = data.repository.owner;
+      logger(`Bot sender detected, falling back to repo owner: ${sender.login}`);
+    }
 
-        if (existingReview && existingReview.status === 'COMPLETED') {
-          logger(`PR #${pr.number} already reviewed, skipping (webhook retry)`);
-          return NextResponse.json({ ok: true, skipped: true });
-        }
+    // ── 1. Find or create user ──
+    let user = await prisma.user.findUnique({
+      where: { githubId: sender.id },
+    });
 
-        // ── 4. Create or reuse Review record ──
-        const review = existingReview && existingReview.status === 'FAILED'
-          ? existingReview
-          : await prisma.review.create({
-              data: {
-                prNumber: pr.number,
-                prTitle: pr.title,
-                status: 'IN_PROGRESS',
-                repositoryId: repository.id,
-                userId: user.id,
-              },
-            });
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          githubId: sender.id,
+          login: sender.login,
+          name: sender.login,
+          email: '',
+          avatarUrl: sender.avatar_url ?? '',
+        },
+      });
+      logger(`Created user ${sender.login}`);
+    }
 
-        // Reset if reusing a failed review
-        if (review.status === 'FAILED') {
-          await prisma.review.update({
-            where: { id: review.id },
-            data: { status: 'IN_PROGRESS', findingsCount: 0, qualityScore: null, completedAt: null },
-          });
-        }
+    // ── 2. Find or create repository ──
+    let repository = await prisma.repository.findFirst({
+      where: { fullName: data.repository.full_name },
+    });
 
-        logger(`Processing review ${review.id} for PR #${pr.number}`);
+    if (!repository) {
+      repository = await prisma.repository.create({
+        data: {
+          githubId: data.repository.id,
+          name: repo,
+          fullName: data.repository.full_name,
+          owner,
+          private: data.repository.private,
+          userId: user.id,
+        },
+      });
+      logger(`Created repository ${data.repository.full_name}`);
+    }
 
-        // ── 5. Fetch diff and run AI review ──
-        const diff = await fetchPullRequestDiff(owner, repo, pr.number);
-        logger(`Fetched diff for PR #${pr.number}: ${diff.length} bytes`);
+    // ── 3. Check for existing review (idempotency for webhook retries) ──
+    const existingReview = await prisma.review.findFirst({
+      where: { prNumber: pr.number, repositoryId: repository.id },
+      orderBy: { createdAt: 'desc' },
+    });
 
-        const result = await reviewDiff(diff);
-        logger(`AI review completed: ${result.findings.length} findings, score=${result.qualityScore}`);
+    if (existingReview && existingReview.status === 'COMPLETED') {
+      logger(`PR #${pr.number} already reviewed, skipping (webhook retry)`);
+      return NextResponse.json({ ok: true, skipped: true });
+    }
 
-        // ── 6. Save findings (delete old ones first if retry) ──
-        await prisma.finding.deleteMany({ where: { reviewId: review.id } });
-        const findings = await Promise.all(
-          result.findings.map((f) =>
-            prisma.finding.create({
-              data: {
-                severity: f.severity,
-                title: f.title,
-                description: f.description,
-                filePath: f.filePath,
-                lineStart: f.lineStart,
-                lineEnd: f.lineEnd,
-                suggestion: f.suggestion,
-                reviewId: review.id,
-              },
-            })
-          )
-        );
-
-        // ── 7. Post review results to GitHub PR BEFORE marking complete ──
-        const commentBody = formatReviewComment(result, pr.title);
-        await postPRReviewComment(owner, repo, pr.number, commentBody);
-        logger(`Posted review comment to PR #${pr.number}`);
-
-        // ── 8. Only now mark review as COMPLETED ──
-        await prisma.review.update({
-          where: { id: review.id },
+    // ── 4. Create or reuse Review record ──
+    const review = existingReview && existingReview.status === 'FAILED'
+      ? existingReview
+      : await prisma.review.create({
           data: {
-            status: 'COMPLETED',
-            diffUrl: `https://github.com/${owner}/${repo}/pull/${pr.number}.diff`,
-            qualityScore: result.qualityScore,
-            findingsCount: findings.length,
-            completedAt: new Date(),
+            prNumber: pr.number,
+            prTitle: pr.title,
+            status: 'IN_PROGRESS',
+            repositoryId: repository.id,
+            userId: user.id,
           },
         });
 
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger(`Failed to process PR #${pr.number}: ${errMsg}`);
+    // Reset if reusing a failed review
+    if (review.status === 'FAILED') {
+      await prisma.review.update({
+        where: { id: review.id },
+        data: { status: 'IN_PROGRESS', findingsCount: 0, qualityScore: null, completedAt: null },
+      });
+    }
 
-        try {
-          const failedReview = await prisma.review.findFirst({
-            where: {
-              prNumber: pr.number,
-              repository: { fullName: data.repository.full_name },
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-          if (failedReview) {
-            await prisma.review.update({
-              where: { id: failedReview.id },
-              data: { status: 'FAILED' },
-            });
-          }
-        } catch (dbErr) {
-          logger(`Failed to update review status to FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
-        }
+    logger(`Processing review ${review.id} for PR #${pr.number}`);
+
+    // ── 5. Fetch diff and run AI review ──
+    const diff = await fetchPullRequestDiff(owner, repo, pr.number);
+    logger(`Fetched diff for PR #${pr.number}: ${diff.length} bytes`);
+
+    const result = await reviewDiff(diff);
+    logger(`AI review completed: ${result.findings.length} findings, score=${result.qualityScore}`);
+
+    // ── 6. Save findings (delete old ones first if retry) ──
+    await prisma.finding.deleteMany({ where: { reviewId: review.id } });
+    const findings = await Promise.all(
+      result.findings.map((f) =>
+        prisma.finding.create({
+          data: {
+            severity: f.severity,
+            title: f.title,
+            description: f.description,
+            filePath: f.filePath,
+            lineStart: f.lineStart,
+            lineEnd: f.lineEnd,
+            suggestion: f.suggestion,
+            reviewId: review.id,
+          },
+        })
+      )
+    );
+
+    // ── 7. Post review results to GitHub PR BEFORE marking complete ──
+    const commentBody = formatReviewComment(result, pr.title);
+    await postPRReviewComment(owner, repo, pr.number, commentBody);
+    logger(`Posted review comment to PR #${pr.number}`);
+
+    // ── 8. Only now mark review as COMPLETED ──
+    await prisma.review.update({
+      where: { id: review.id },
+      data: {
+        status: 'COMPLETED',
+        diffUrl: `https://github.com/${owner}/${repo}/pull/${pr.number}.diff`,
+        qualityScore: result.qualityScore,
+        findingsCount: findings.length,
+        completedAt: new Date(),
+      },
+    });
+
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger(`Failed to process PR #${pr.number}: ${errMsg}`);
+
+    try {
+      const failedReview = await prisma.review.findFirst({
+        where: {
+          prNumber: pr.number,
+          repository: { fullName: data.repository.full_name },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (failedReview) {
+        await prisma.review.update({
+          where: { id: failedReview.id },
+          data: { status: 'FAILED' },
+        });
       }
+    } catch (dbErr) {
+      logger(`Failed to update review status to FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
     }
   }
 
