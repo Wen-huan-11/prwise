@@ -182,7 +182,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       reviewId: review.id,
-      repository: repository.fullName,
+      repository: { fullName: repository.fullName },
       prNumber: pullNumber,
       status: 'COMPLETED',
       qualityScore: result.qualityScore,
