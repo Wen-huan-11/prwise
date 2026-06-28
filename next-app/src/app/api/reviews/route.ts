@@ -122,8 +122,10 @@ export async function POST(request: Request) {
     }
     const repoData = await repoRes.json();
 
-    repository = await prisma.repository.create({
-      data: {
+    repository = await prisma.repository.upsert({
+      where: { githubId: repoData.id },
+      update: { fullName: `${owner}/${repo}`, userId: user.id },
+      create: {
         githubId: repoData.id,
         name: repo,
         fullName: `${owner}/${repo}`,
