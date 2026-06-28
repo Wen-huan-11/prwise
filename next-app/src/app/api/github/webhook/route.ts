@@ -158,8 +158,8 @@ export async function POST(request: Request) {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (existingReview && existingReview.status === 'COMPLETED') {
-      logger(`PR #${pr.number} already reviewed, skipping (webhook retry)`);
+    if (existingReview && (existingReview.status === 'COMPLETED' || existingReview.status === 'IN_PROGRESS')) {
+      logger(`PR #${pr.number} already ${existingReview.status.toLowerCase()}, skipping (webhook retry)`);
       return NextResponse.json({ ok: true, skipped: true });
     }
 
@@ -212,12 +212,9 @@ export async function POST(request: Request) {
       )
     );
 
-    // ── 7. Post review results to GitHub PR BEFORE marking complete ──
-    const commentBody = formatReviewComment(result, pr.title);
-    await postPRReviewComment(owner, repo, pr.number, commentBody);
-    logger(`Posted review comment to PR #${pr.number}`);
-
-    // ── 8. Only now mark review as COMPLETED ──
+    // ── 7. Update DB to COMPLETED before posting comment ──
+    // This ensures DB state is consistent even if the comment post fails.
+    // If the comment post fails, the catch block will mark it as FAILED.
     await prisma.review.update({
       where: { id: review.id },
       data: {
@@ -228,6 +225,11 @@ export async function POST(request: Request) {
         completedAt: new Date(),
       },
     });
+
+    // ── 8. Post review results to GitHub PR ──
+    const commentBody = formatReviewComment(result, pr.title);
+    await postPRReviewComment(owner, repo, pr.number, commentBody);
+    logger(`Posted review comment to PR #${pr.number}`);
 
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

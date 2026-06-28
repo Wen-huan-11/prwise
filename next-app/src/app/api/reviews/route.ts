@@ -39,6 +39,9 @@ export async function POST(request: Request) {
 
   // ── Demo mode: review a raw code snippet (no auth required) ──
   if (body.code && typeof body.code === 'string') {
+    if (body.code.length > 10000) {
+      return NextResponse.json({ error: 'Code snippet exceeds 10KB limit for demo mode' }, { status: 413 });
+    }
     try {
       const result = await reviewDiff(body.code, true, body.lang ?? 'zh');
       return NextResponse.json({
@@ -131,21 +134,21 @@ export async function POST(request: Request) {
     });
   }
 
-  // ── Increment usage ──
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { reviewsUsed: { increment: 1 } },
-  });
-
-  const review = await prisma.review.create({
-    data: {
-      prNumber: pullNumber,
-      prTitle: `PR #${pullNumber}`,
-      status: 'IN_PROGRESS',
-      repositoryId: repository.id,
-      userId: user.id,
-    },
-  });
+  const [review] = await prisma.$transaction([
+    prisma.review.create({
+      data: {
+        prNumber: pullNumber,
+        prTitle: `PR #${pullNumber}`,
+        status: 'IN_PROGRESS',
+        repositoryId: repository.id,
+        userId: user.id,
+      },
+    }),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { reviewsUsed: { increment: 1 } },
+    }),
+  ]);
 
   try {
     const diff = await fetchPullRequestDiff(owner, repo, pullNumber);
