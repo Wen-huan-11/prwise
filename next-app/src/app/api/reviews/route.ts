@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { fetchPullRequestDiff } from '@/lib/github';
 import { reviewDiff } from '@/lib/ai';
 import { parseGithubId, getRequiredEnv, fetchWithTimeout } from '@/lib/utils';
+import { persistLog } from '@/lib/log';
 
 const PR_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)$/;
 
@@ -199,7 +200,14 @@ export async function POST(request: Request) {
       findings: result.findings,
     });
   } catch (err) {
-    // Only rollback quota if review did not actually complete
+    const errMsg = err instanceof Error ? err.message : String(err);
+
+    await persistLog({
+      level: 'ERROR', source: 'reviews', message: `Review failed for ${owner}/${repo}#${pullNumber}: ${errMsg}`,
+      metadata: { owner, repo, pullNumber, completed, userId: user.id, reviewId: review.id },
+      userId: user.id, reviewId: review.id,
+    });
+
     if (!completed) {
       await prisma.user.update({
         where: { id: user.id },
@@ -213,7 +221,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      error: err instanceof Error ? err.message : 'Review failed',
+      error: errMsg,
       reviewId: review.id,
     }, { status: 500 });
   }

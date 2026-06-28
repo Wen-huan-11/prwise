@@ -1,6 +1,7 @@
 import NextAuth, { type AuthOptions } from 'next-auth';
 import GitHub from 'next-auth/providers/github';
 import { prisma } from '@/lib/prisma';
+import { persistLog } from '@/lib/log';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -31,7 +32,7 @@ export const authOptions: AuthOptions = {
             },
           });
         } catch (err) {
-          console.error(`[auth] Failed to upsert user ${p.login} (githubId=${p.id}):`, err instanceof Error ? err.message : String(err));
+          await persistLog({ level: 'ERROR', source: 'auth', message: `Failed to upsert user ${p.login}`, metadata: { githubId: p.id, error: err instanceof Error ? err.message : String(err) } });
           return false;
         }
       }

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { fetchPullRequestDiff, postPRReviewComment } from '@/lib/github';
 import { reviewDiff, ReviewResult } from '@/lib/ai';
+import { persistLog } from '@/lib/log';
 
 function verifySignature(payload: string, signature: string | null, secret: string): boolean {
   if (!signature) return false;
@@ -12,17 +13,6 @@ function verifySignature(payload: string, signature: string | null, secret: stri
   const expected = prefix + hmac;
   if (signature.length !== expected.length) return false;
   return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-}
-
-function logger(message: string, data?: unknown) {
-  if (process.env.NODE_ENV !== 'production') {
-    const ts = new Date().toISOString();
-    if (data) {
-      console.log(`[webhook] ${ts} ${message}`, data);
-    } else {
-      console.log(`[webhook] ${ts} ${message}`);
-    }
-  }
 }
 
 /**
@@ -68,10 +58,9 @@ export async function POST(request: Request) {
   const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
 
   if (webhookSecret && !verifySignature(text, signature, webhookSecret)) {
+    await persistLog({ level: 'ERROR', source: 'webhook', message: 'Invalid webhook signature' });
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
-
-  logger(`Received event: ${event}`);
 
   if (event !== 'pull_request') {
     return NextResponse.json({ ok: true });
@@ -81,7 +70,7 @@ export async function POST(request: Request) {
   try {
     data = JSON.parse(text);
   } catch {
-    logger('Failed to parse webhook payload as JSON');
+    await persistLog({ level: 'ERROR', source: 'webhook', message: 'Failed to parse webhook payload as JSON' });
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
@@ -89,25 +78,22 @@ export async function POST(request: Request) {
   const pr = data.pull_request;
 
   if (!pr || !action) {
-    logger('Missing pull_request or action in webhook payload');
+    await persistLog({ level: 'WARN', source: 'webhook', message: 'Missing pull_request or action' });
     return NextResponse.json({ error: 'Missing pull_request or action' }, { status: 400 });
   }
 
   if (action !== 'opened' && action !== 'synchronize') {
-    logger(`Unhandled pull_request action: ${action}`);
     return NextResponse.json({ ok: true });
   }
 
   const [owner, repo] = data.repository.full_name.split('/');
   let sender = data.sender;
 
-  logger(`PR #${pr.number} ${action} in ${data.repository.full_name}`);
-
   try {
     // ── 0. Handle bot-triggered events (GitHub Actions, etc.) ──
     if (sender.type === 'Bot') {
       sender = data.repository.owner;
-      logger(`Bot sender detected, falling back to repo owner: ${sender.login}`);
+      await persistLog({ level: 'WARN', source: 'webhook', message: `Bot sender, fell back to ${sender.login}`, metadata: { repo: data.repository.full_name } });
     }
 
     // ── 1. Find or create user (upsert handles race conditions) ──
@@ -149,7 +135,7 @@ export async function POST(request: Request) {
           userId: user.id,
         },
       });
-      logger(`Created/claimed repository ${data.repository.full_name}`);
+      await persistLog({ level: 'INFO', source: 'webhook', message: `Created/claimed repo ${data.repository.full_name}` });
     }
 
     // ── 3. Check for existing review (idempotency for webhook retries) ──
@@ -159,7 +145,6 @@ export async function POST(request: Request) {
     });
 
     if (existingReview && (existingReview.status === 'COMPLETED' || existingReview.status === 'IN_PROGRESS')) {
-      logger(`PR #${pr.number} already ${existingReview.status.toLowerCase()}, skipping (webhook retry)`);
       return NextResponse.json({ ok: true, skipped: true });
     }
 
@@ -184,14 +169,10 @@ export async function POST(request: Request) {
       });
     }
 
-    logger(`Processing review ${review.id} for PR #${pr.number}`);
-
     // ── 5. Fetch diff and run AI review ──
     const diff = await fetchPullRequestDiff(owner, repo, pr.number);
-    logger(`Fetched diff for PR #${pr.number}: ${diff.length} bytes`);
 
     const result = await reviewDiff(diff);
-    logger(`AI review completed: ${result.findings.length} findings, score=${result.qualityScore}`);
 
     // ── 6. Save findings (delete old ones first if retry) ──
     await prisma.finding.deleteMany({ where: { reviewId: review.id } });
@@ -229,11 +210,14 @@ export async function POST(request: Request) {
     // ── 8. Post review results to GitHub PR ──
     const commentBody = formatReviewComment(result, pr.title);
     await postPRReviewComment(owner, repo, pr.number, commentBody);
-    logger(`Posted review comment to PR #${pr.number}`);
 
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    logger(`Failed to process PR #${pr.number}: ${errMsg}`);
+    await persistLog({
+      level: 'ERROR', source: 'webhook',
+      message: `Failed to process PR #${pr.number}: ${errMsg}`,
+      metadata: { repo: `${owner}/${repo}`, prNumber: pr.number, action },
+    });
 
     try {
       const failedReview = await prisma.review.findFirst({
@@ -250,7 +234,10 @@ export async function POST(request: Request) {
         });
       }
     } catch (dbErr) {
-      logger(`Failed to update review status to FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+      await persistLog({
+        level: 'ERROR', source: 'webhook',
+        message: `Failed to mark review FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`,
+      });
     }
   }
 

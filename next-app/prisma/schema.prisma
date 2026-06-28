@@ -95,3 +95,18 @@ model Finding {
   reviewId String
   review   Review @relation(fields: [reviewId], references: [id])
 }
+
+model Log {
+  id        String   @id @default(uuid())
+  level     String   @default("INFO")
+  source    String
+  message   String
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  userId   String?
+  reviewId String?
+
+  @@index([source, createdAt])
+  @@index([level, createdAt])
+}
