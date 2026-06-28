@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="page_title">PRwise — AI Pull Request Review Agent</title>
+  <meta name="description" content="AI 自动审查每行代码变更。检测 Bug、安全漏洞、逻辑错误，30 秒内返回结果。">
+  <script src="https://cdn.tailwindcss.com">
+  </script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              200: '#a7f3d0',
+              300: '#6ee7b7',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b',
+              950: '#022c22',
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Inter', system-ui, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace !important; }
+    html { scroll-behavior: smooth; }
+    .animate-in { opacity: 0; transform: translateY(24px); transition: all 0.6s ease-out; }
+    .animate-in.show { opacity: 1; transform: translateY(0); }
+    .gradient-text { background: linear-gradient(135deg, #10b981, #34d399, #6ee7b7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .glow { box-shadow: 0 0 40px rgba(16, 185, 129, 0.15); }
+    .counter-value { display: inline-block; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeInUp 0.5s ease forwards; }
+    .code-bg { background: #0f172a; }
+    .diff-add { background: rgba(16, 185, 129, 0.15); border-left: 3px solid #10b981; }
+    .diff-remove { background: rgba(239, 68, 68, 0.15); border-left: 3px solid #ef4444; }
+    .lang-btn { cursor: pointer; transition: all 0.2s; }
+    .lang-btn:hover { color: #fff; }
+    .lang-btn.active { color: #10b981; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased">
+
+  <!-- ─── Navigation ─── -->
+  <nav class="fixed top-0 inset-x-0 z-50 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800/50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 bg-brand-500 rounded-lg flex items-center justify-center text-xs font-bold text-slate-950">P</div>
+        <span class="font-semibold text-lg">PRwise</span>
+      </div>
+      <div class="hidden md:flex items-center gap-6 text-sm text-slate-400">
+        <a href="#features" class="hover:text-white transition" data-i18n="nav_features">Features</a>
+        <a href="#demo" class="hover:text-white transition" data-i18n="nav_demo">Demo</a>
+        <a href="#pricing" class="hover:text-white transition" data-i18n="nav_pricing">Pricing</a>
+        <a href="#faq" class="hover:text-white transition" data-i18n="nav_faq">FAQ</a>
+        <span class="w-px h-4 bg-slate-700"></span>
+        <button class="lang-btn text-xs font-medium uppercase tracking-wider text-slate-500 flex items-center gap-1.5" onclick="switchLang()" id="langToggle">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span id="langLabel">EN</span>
+        </button>
+      </div>
+      <a href="#install" class="inline-flex items-center gap-2 bg-brand-500 hover:bg-brand-400 text-slate-950 font-medium text-sm px-4 py-2 rounded-lg transition-all hover:shadow-lg hover:shadow-brand-500/25" data-i18n="nav_install">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        Install on GitHub
+      </a>
+    </div>
+  </nav>
+
+  <!-- ─── Hero ─── -->
+  <section class="pt-32 pb-20 px-4 relative overflow-hidden">
+    <div class="absolute inset-0 bg-gradient-to-b from-brand-950/20 via-transparent to-transparent pointer-events-none"></div>
+    <div class="max-w-6xl mx-auto">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <div class="space-y-8 fade-up" style="animation-delay:0.1s">
+          <div class="inline-flex items-center gap-2 bg-brand-500/10 border border-brand-500/20 rounded-full px-4 py-1.5 text-sm text-brand-300">
+            <span class="w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span>
+            <span data-i18n="hero_badge">Now in Public Beta</span>
+          </div>
+          <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight">
+            <span data-i18n="hero_title_1">让你的 PR Review</span><br>
+            <span class="gradient-text" data-i18n="hero_title_2">从 30 分钟变成 30 秒</span>
+          </h1>
+          <p class="text-lg sm:text-xl text-slate-400 leading-relaxed max-w-lg" data-i18n="hero_sub">
+            PRwise 是你代码仓库的 AI Review 搭档。自动检测 bug、安全漏洞、逻辑错误，在同事看到之前就先找到问题。
+          </p>
+          <div class="flex flex-wrap gap-4">
+            <a href="#install" class="inline-flex items-center gap-2 bg-brand-500 hover:bg-brand-400 text-slate-950 font-semibold px-6 py-3 rounded-xl transition-all hover:shadow-xl hover:shadow-brand-500/25">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              <span data-i18n="hero_cta_1">Install on GitHub — Free</span>
+            </a>
+            <a href="#demo" class="inline-flex items-center gap-2 border border-slate-700 hover:border-slate-500 text-slate-300 font-medium px-6 py-3 rounded-xl transition-all">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span data-i18n="hero_cta_2">View Live Demo</span>
+            </a>
+          </div>
+          <p class="text-xs text-slate-500" data-i18n="hero_footnote">No credit card required · 1-minute setup · Supports JS/TS/Python/Go/Rust</p>
+        </div>
+        <!-- Hero Mockup -->
+        <div class="relative fade-up" style="animation-delay:0.3s">
+          <div class="glow absolute inset-0 rounded-2xl"></div>
+          <div class="code-bg rounded-2xl border border-slate-800 overflow-hidden shadow-2xl relative">
+            <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-slate-900/50">
+              <div class="flex gap-1.5">
+                <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+                <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+              </div>
+              <span class="text-xs text-slate-600 ml-2 font-mono">PR #42 · feat/user-auth</span>
+            </div>
+            <div class="p-4 space-y-3 text-sm font-mono leading-relaxed">
+              <div class="diff-remove px-3 py-2 rounded text-slate-400">- function getUser(id) {</div>
+              <div class="diff-remove px-3 py-2 rounded text-slate-400">- &nbsp;&nbsp;const data = fetch(`/users/${id}`);</div>
+              <div class="diff-remove px-3 py-2 rounded text-slate-400">- &nbsp;&nbsp;return data.json();</div>
+              <div class="diff-remove px-3 py-2 rounded text-slate-400">- }</div>
+              <div class="diff-add px-3 py-2 rounded text-slate-200">+ function getUser(id) {</div>
+              <div class="diff-add px-3 py-2 rounded text-slate-200">+ &nbsp;&nbsp;if (!id) throw new Error('id is required');</div>
+              <div class="diff-add px-3 py-2 rounded text-slate-200">+ &nbsp;&nbsp;const data = await fetch(`/users/${id}`);</div>
+              <div class="diff-add px-3 py-2 rounded text-slate-200">+ &nbsp;&nbsp;return data.json();</div>
+              <div class="diff-add px-3 py-2 rounded text-slate-200">+ }</div>
+              <!-- AI Comment -->
+              <div class="mt-4 p-3 bg-brand-500/10 border border-brand-500/20 rounded-xl">
+                <div class="flex items-start gap-3">
+                  <div class="w-6 h-6 bg-brand-500 rounded-full flex items-center justify-center text-xs font-bold text-slate-950 shrink-0 mt-0.5">AI</div>
+                  <div class="space-y-1">
+                    <div class="text-brand-300 font-semibold text-xs uppercase tracking-wider" data-i18n="mockup_review_found">Review Found</div>
+                    <ul class="text-sm text-slate-300 space-y-1">
+                      <li class="flex items-start gap-2"><span class="text-yellow-400 shrink-0">&#9888;</span> <span data-i18n="mockup_item_1">Missing await — fetch() returns Promise</span></li>
+                      <li class="flex items-start gap-2"><span class="text-red-400 shrink-0">&#10005;</span> <span data-i18n="mockup_item_2">Missing null check — id could be undefined</span></li>
+                      <li class="flex items-start gap-2"><span class="text-green-400 shrink-0">&#10003;</span> <span data-i18n="mockup_item_3">Suggestion: add validation + await</span></li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Social Proof ─── -->
+  <section class="py-16 border-y border-slate-800/50 bg-slate-900/30">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+        <div class="space-y-1">
+          <div class="text-3xl sm:text-4xl font-bold text-white counter" data-target="2847">0</div>
+          <div class="text-sm text-slate-500" data-i18n="stat_reviews">Pull Requests Reviewed</div>
+        </div>
+        <div class="space-y-1">
+          <div class="text-3xl sm:text-4xl font-bold text-brand-400 counter" data-target="1203">0</div>
+          <div class="text-sm text-slate-500" data-i18n="stat_bugs">Bugs Detected</div>
+        </div>
+        <div class="space-y-1">
+          <div class="text-3xl sm:text-4xl font-bold text-white counter" data-target="15">0</div>
+          <div class="text-sm text-slate-500" data-i18n="stat_languages">Languages Supported</div>
+        </div>
+        <div class="space-y-1">
+          <div class="text-3xl sm:text-4xl font-bold text-white"><span class="counter" data-target="20">0</span><span class="text-brand-400">s</span></div>
+          <div class="text-sm text-slate-500" data-i18n="stat_time">Avg Review Time</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Problem ─── -->
+  <section class="py-24 px-4" id="problem">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-16 space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="problem_label">The Problem</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="problem_title">Code Review 正在拖慢你的团队</h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4 hover:border-slate-700 transition">
+          <div class="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center text-2xl">&#128034;</div>
+          <h3 class="text-lg font-semibold" data-i18n="problem_1_title">速度慢</h3>
+          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="problem_1_desc">中型 PR 人工 Review 平均需要 30-60 分钟。等待 Review 成为开发流程中最长的阻塞环节。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4 hover:border-slate-700 transition">
+          <div class="w-12 h-12 bg-red-500/10 rounded-xl flex items-center justify-center text-2xl">&#129504;</div>
+          <h3 class="text-lg font-semibold" data-i18n="problem_2_title">容易遗漏</h3>
+          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="problem_2_desc">人眼很难在 500+ 行的 diff 中同时关注逻辑正确性、边界条件、安全漏洞和代码风格。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4 hover:border-slate-700 transition">
+          <div class="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center text-2xl">&#128293;</div>
+          <h3 class="text-lg font-semibold" data-i18n="problem_3_title">团队瓶颈</h3>
+          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="problem_3_desc">核心开发者每天花 2-4 小时 Review 代码，成为团队吞吐量的天花板。</p>
+        </div>
+      </div>
+      <div class="text-center mt-10">
+        <p class="text-slate-500 text-lg" data-i18n="problem_footer">现在，AI 可以帮你处理 80% 的常规 Review。人类只需要关注架构和业务逻辑。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── How It Works ─── -->
+  <section class="py-24 px-4 bg-slate-900/30" id="how">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-16 space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="how_label">How It Works</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="how_title">AI 做初筛，人来决策</h2>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8 relative">
+        <div class="hidden md:block absolute top-12 left-[calc(16.66%+24px)] right-[calc(16.66%+24px)] h-0.5 bg-gradient-to-r from-brand-500/40 via-brand-400/40 to-brand-500/40"></div>
+        <div class="text-center space-y-4 relative">
+          <div class="w-14 h-14 bg-brand-500/10 border border-brand-500/20 rounded-2xl flex items-center justify-center text-2xl font-bold text-brand-400 mx-auto relative z-10">1</div>
+          <h3 class="text-lg font-semibold" data-i18n="how_step_1">提交 PR</h3>
+          <p class="text-sm text-slate-400" data-i18n="how_step_1_desc">开发者提交 Pull Request 到 GitHub。PRwise 自动被 Webhook 触发。</p>
+        </div>
+        <div class="text-center space-y-4 relative">
+          <div class="w-14 h-14 bg-brand-500/10 border border-brand-500/20 rounded-2xl flex items-center justify-center text-2xl font-bold text-brand-400 mx-auto relative z-10">2</div>
+          <h3 class="text-lg font-semibold" data-i18n="how_step_2">AI 自动审查</h3>
+          <p class="text-sm text-slate-400" data-i18n="how_step_2_desc">PRwise 读取 diff、相关文件和上下文，运行多维度 AI 分析。</p>
+        </div>
+        <div class="text-center space-y-4 relative">
+          <div class="w-14 h-14 bg-brand-500/10 border border-brand-500/20 rounded-2xl flex items-center justify-center text-2xl font-bold text-brand-400 mx-auto relative z-10">3</div>
+          <h3 class="text-lg font-semibold" data-i18n="how_step_3">结果发布</h3>
+          <p class="text-sm text-slate-400" data-i18n="how_step_3_desc">PR 下方直接显示审查结果。Bug 标记、修改建议、质量评分一目了然。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Features ─── -->
+  <section class="py-24 px-4" id="features">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-16 space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="features_label">Features</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="features_title">不只是 Lint，而是理解你代码逻辑的 AI</h2>
+      </div>
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition group">
+          <div class="w-10 h-10 bg-red-500/10 rounded-lg flex items-center justify-center text-lg group-hover:scale-110 transition">&#128270;</div>
+          <h3 class="font-semibold text-sm" data-i18n="feature_1_title">Bug 检测</h3>
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="feature_1_desc">自动识别空指针、边界条件遗漏、异步错误、类型不匹配。准确率持续提升。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition group">
+          <div class="w-10 h-10 bg-yellow-500/10 rounded-lg flex items-center justify-center text-lg group-hover:scale-110 transition">&#128274;</div>
+          <h3 class="font-semibold text-sm" data-i18n="feature_2_title">安全扫描</h3>
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="feature_2_desc">检测密钥泄露、SQL 注入、XSS 漏洞、不安全的依赖版本。内置安全引擎。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition group">
+          <div class="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center text-lg group-hover:scale-110 transition">&#128202;</div>
+          <h3 class="font-semibold text-sm" data-i18n="feature_3_title">质量评分</h3>
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="feature_3_desc">每个文件的复杂度、可维护性、测试覆盖度评分。追踪 PR 间质量趋势。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition group">
+          <div class="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center text-lg group-hover:scale-110 transition">&#9889;</div>
+          <h3 class="font-semibold text-sm" data-i18n="feature_4_title">增量审查</h3>
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="feature_4_desc">只分析变更代码，不重复检查未改动部分。大项目中也能 30 秒内返回。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition group">
+          <div class="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center text-lg group-hover:scale-110 transition">&#127919;</div>
+          <h3 class="font-semibold text-sm" data-i18n="feature_5_title">自定义规则</h3>
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="feature_5_desc">配置团队编码规范。支持 ESLint 规则导入、自定义正则、命名约定。</p>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 space-y-3 hover:border-slate-700 transition group">
+          <div class="w-10 h-10 bg-cyan-500/10 rounded-lg flex items-center justify-center text-lg group-hover:scale-110 transition">&#128279;</div>
+          <h3 class="font-semibold text-sm" data-i18n="feature_6_title">CI 深度集成</h3>
+          <p class="text-xs text-slate-400 leading-relaxed" data-i18n="feature_6_desc">通过 GitHub Actions 接入。PR 不通过审查可以阻止合并，保护主分支。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── 3-Step Setup ─── -->
+  <section class="py-24 px-4 bg-slate-900/30" id="setup">
+    <div class="max-w-4xl mx-auto text-center space-y-12">
+      <div class="space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="setup_label">Setup</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="setup_title">3 分钟接入你的仓库</h2>
+        <p class="text-slate-400" data-i18n="setup_sub">不需要 YAML 配置，不需要 API Key，安装即用。</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 text-left">
+          <div class="flex items-center gap-3">
+            <span class="w-8 h-8 bg-brand-500/20 text-brand-400 rounded-lg flex items-center justify-center font-bold text-sm">1</span>
+            <span class="text-sm text-slate-500" data-i18n="setup_step_1_label">Step 1</span>
+          </div>
+          <h3 class="font-semibold" data-i18n="setup_step_1_title">Install from GitHub Marketplace</h3>
+          <p class="text-sm text-slate-400" data-i18n="setup_step_1_desc">点击按钮，选择你的仓库，授权安装。整个过程不到 1 分钟。</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 text-left">
+          <div class="flex items-center gap-3">
+            <span class="w-8 h-8 bg-brand-500/20 text-brand-400 rounded-lg flex items-center justify-center font-bold text-sm">2</span>
+            <span class="text-sm text-slate-500" data-i18n="setup_step_2_label">Step 2</span>
+          </div>
+          <h3 class="font-semibold" data-i18n="setup_step_2_title">Configure Rules (Optional)</h3>
+          <p class="text-sm text-slate-400" data-i18n="setup_step_2_desc">默认配置即可用。你也可以自定义审查粒度、忽略特定目录、设置规则。</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 text-left">
+          <div class="flex items-center gap-3">
+            <span class="w-8 h-8 bg-brand-500/20 text-brand-400 rounded-lg flex items-center justify-center font-bold text-sm">3</span>
+            <span class="text-sm text-slate-500" data-i18n="setup_step_3_label">Step 3</span>
+          </div>
+          <h3 class="font-semibold" data-i18n="setup_step_3_title">Submit a PR — Auto Reviewed</h3>
+          <p class="text-sm text-slate-400" data-i18n="setup_step_3_desc">提交 PR，30 秒内 AI 自动返回审查结果。一切自动完成。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Demo / Example ─── -->
+  <section class="py-24 px-4" id="demo">
+    <div class="max-w-4xl mx-auto">
+      <div class="text-center mb-12 space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="demo_label">Live Example</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="demo_title">看它如何工作</h2>
+      </div>
+      <div class="code-bg rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-slate-900/50">
+          <div class="flex gap-1.5">
+            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+          </div>
+          <span class="text-xs text-slate-600 ml-2 font-mono">PR #42 · user.ts:45-48</span>
+        </div>
+        <div class="p-5 font-mono text-sm leading-relaxed space-y-1">
+          <div class="diff-remove px-3 py-1.5 rounded text-slate-400"><span class="text-red-400 mr-3">-</span>function getUser(id) {</div>
+          <div class="diff-remove px-3 py-1.5 rounded text-slate-400"><span class="text-red-400 mr-3">-</span>  const data = fetch(`/users/${id}`);</div>
+          <div class="diff-remove px-3 py-1.5 rounded text-slate-400"><span class="text-red-400 mr-3">-</span>  return data.json();</div>
+          <div class="diff-remove px-3 py-1.5 rounded text-slate-400"><span class="text-red-400 mr-3">-</span>}</div>
+          <div class="h-2"></div>
+          <div class="diff-add px-3 py-1.5 rounded text-slate-200"><span class="text-green-400 mr-3">+</span>function getUser(id: string) {</div>
+          <div class="diff-add px-3 py-1.5 rounded text-slate-200"><span class="text-green-400 mr-3">+</span>  if (!id) throw new Error('id is required');</div>
+          <div class="diff-add px-3 py-1.5 rounded text-slate-200"><span class="text-green-400 mr-3">+</span>  const data = await fetch(`/users/${id}`);</div>
+          <div class="diff-add px-3 py-1.5 rounded text-slate-200"><span class="text-green-400 mr-3">+</span>  return data.json() as User;</div>
+          <div class="diff-add px-3 py-1.5 rounded text-slate-200"><span class="text-green-400 mr-3">+</span>}</div>
+        </div>
+        <!-- AI Review Output -->
+        <div class="border-t border-slate-800">
+          <div class="px-5 py-3 bg-brand-950/40">
+            <div class="flex items-center gap-2 text-xs text-brand-400 font-semibold uppercase tracking-wider mb-3">
+              <div class="w-5 h-5 bg-brand-500 rounded flex items-center justify-center text-[10px] font-bold text-slate-950">AI</div>
+              <span data-i18n="demo_review_results">Review Results</span>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-start gap-3 p-2.5 bg-red-500/5 rounded-lg border border-red-500/10">
+                <span class="text-red-400 shrink-0 mt-0.5">&#10005;</span>
+                <div><span class="text-red-300 font-medium text-sm" data-i18n="demo_finding_1_title">Missing await</span><br><span class="text-xs text-slate-500" data-i18n="demo_finding_1_desc">fetch() returns a Promise. Without await, the function returns a Promise instead of the actual data.</span></div>
+              </div>
+              <div class="flex items-start gap-3 p-2.5 bg-yellow-500/5 rounded-lg border border-yellow-500/10">
+                <span class="text-yellow-400 shrink-0 mt-0.5">&#9888;</span>
+                <div><span class="text-yellow-300 font-medium text-sm" data-i18n="demo_finding_2_title">Missing null check</span><br><span class="text-xs text-slate-500" data-i18n="demo_finding_2_desc">id parameter could be null or undefined. Add validation before using it in the fetch URL.</span></div>
+              </div>
+              <div class="flex items-start gap-3 p-2.5 bg-green-500/5 rounded-lg border border-green-500/10">
+                <span class="text-green-400 shrink-0 mt-0.5">&#10003;</span>
+                <div><span class="text-green-300 font-medium text-sm" data-i18n="demo_finding_3_title">Suggestion: Add type annotation</span><br><span class="text-xs text-slate-500" data-i18n="demo_finding_3_desc">function getUser(id: string): Promise&lt;User&gt; would improve type safety.</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Trust / Languages ─── -->
+  <section class="py-20 px-4 bg-slate-900/30">
+    <div class="max-w-5xl mx-auto text-center space-y-10">
+      <div class="space-y-3">
+        <h2 class="text-2xl sm:text-3xl font-bold" data-i18n="trust_title">支持 15+ 编程语言</h2>
+        <p class="text-slate-400" data-i18n="trust_sub">覆盖主流技术栈，持续扩展中</p>
+      </div>
+      <div class="flex flex-wrap justify-center gap-3 text-sm">
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">JavaScript</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">TypeScript</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Python</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Go</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Rust</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Java</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Ruby</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">C#</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">PHP</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Swift</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Kotlin</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Scala</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">Shell</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">SQL</span>
+        <span class="px-4 py-2 bg-slate-800/50 rounded-lg text-slate-300 border border-slate-700/50">GraphQL</span>
+      </div>
+      <div class="pt-6 border-t border-slate-800/50">
+        <div class="inline-flex items-center gap-3 bg-brand-500/5 border border-brand-500/10 rounded-xl px-6 py-3">
+          <svg class="w-5 h-5 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          <span class="text-sm text-slate-300"><span data-i18n="trust_oss_1">开源项目 </span><span class="text-brand-400 font-semibold" data-i18n="trust_oss_2">永久免费</span><span data-i18n="trust_oss_3">。我们相信好的工具应该回馈社区。</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Pricing ─── -->
+  <section class="py-24 px-4" id="pricing">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-12 space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="pricing_label">Pricing</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="pricing_title">简单透明的定价</h2>
+        <p class="text-slate-400" data-i18n="pricing_sub">7 天免费试用 Pro 版，无需信用卡。</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+        <!-- Free -->
+        <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div class="space-y-2">
+            <h3 class="text-lg font-semibold" data-i18n="pricing_free_name">Free</h3>
+            <div class="text-3xl font-bold">$0</div>
+            <p class="text-sm text-slate-500" data-i18n="pricing_free_desc">适合个人开发者</p>
+          </div>
+          <ul class="space-y-3 text-sm">
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_free_1">50 次 Review / 月</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_free_2">公开仓库</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_free_3">基础 Bug 检测</span></li>
+          </ul>
+          <a href="#install" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-slate-300 font-medium py-2.5 rounded-xl transition-all text-sm" data-i18n="pricing_free_cta">Install Free</a>
+        </div>
+        <!-- Pro -->
+        <div class="bg-slate-900 border-2 border-brand-500 rounded-2xl p-6 space-y-6 relative scale-105 shadow-2xl shadow-brand-500/10">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-500 text-slate-950 text-xs font-bold px-4 py-1 rounded-full" data-i18n="pricing_pro_badge">Most Popular</div>
+          <div class="space-y-2 pt-1">
+            <h3 class="text-lg font-semibold" data-i18n="pricing_pro_name">Pro</h3>
+            <div class="text-3xl font-bold">$49<span class="text-base font-normal text-slate-500" data-i18n="pricing_per_month">/月</span></div>
+            <p class="text-sm text-slate-500" data-i18n="pricing_pro_desc">适合小团队（2-10人）</p>
+          </div>
+          <ul class="space-y-3 text-sm">
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span><span class="font-semibold text-white" data-i18n="pricing_pro_unlimited">无限</span> <span data-i18n="pricing_pro_1">Review</span></span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_pro_2">公开 + 私有仓库</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_pro_3">GitHub Actions 集成</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_pro_4">自定义规则</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_pro_5">3 个席位</span></li>
+          </ul>
+          <a href="#install" class="block w-full text-center bg-brand-500 hover:bg-brand-400 text-slate-950 font-semibold py-2.5 rounded-xl transition-all hover:shadow-lg hover:shadow-brand-500/25 text-sm" data-i18n="pricing_pro_cta">Start Free Trial</a>
+          <p class="text-xs text-center text-slate-600" data-i18n="pricing_pro_note">No credit card required</p>
+        </div>
+        <!-- Team -->
+        <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div class="space-y-2">
+            <h3 class="text-lg font-semibold" data-i18n="pricing_team_name">Team</h3>
+            <div class="text-3xl font-bold">$199<span class="text-base font-normal text-slate-500" data-i18n="pricing_per_month">/月</span></div>
+            <p class="text-sm text-slate-500" data-i18n="pricing_team_desc">适合中型团队（10-50人）</p>
+          </div>
+          <ul class="space-y-3 text-sm">
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_team_1">全部 Pro 功能</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_team_2">10 个席位</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_team_3">SSO / SAML</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_team_4">GitLab / Bitbucket</span></li>
+            <li class="flex items-start gap-3"><svg class="w-4 h-4 text-brand-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg><span data-i18n="pricing_team_5">优先支持</span></li>
+          </ul>
+          <a href="#install" class="block w-full text-center border border-slate-700 hover:border-slate-500 text-slate-300 font-medium py-2.5 rounded-xl transition-all text-sm" data-i18n="pricing_team_cta">Contact Us</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── FAQ ─── -->
+  <section class="py-24 px-4 bg-slate-900/30" id="faq">
+    <div class="max-w-3xl mx-auto">
+      <div class="text-center mb-12 space-y-4">
+        <span class="text-sm uppercase tracking-widest text-slate-500 font-medium" data-i18n="faq_label">FAQ</span>
+        <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="faq_title">常见问题</h2>
+      </div>
+      <div class="space-y-3">
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl">
+          <button class="faq-btn w-full text-left px-5 py-4 flex items-center justify-between gap-4" onclick="toggleFaq(this)">
+            <span class="font-medium text-sm" data-i18n="faq_q1">我的代码会被用来训练模型吗？</span>
+            <svg class="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer hidden px-5 pb-4 text-sm text-slate-400 leading-relaxed" data-i18n="faq_a1">
+            不会。我们仅使用 LLM API 进行推理，不会将你的代码用于训练。代码通过 TLS 加密传输，不留存在我们服务器上。
+          </div>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl">
+          <button class="faq-btn w-full text-left px-5 py-4 flex items-center justify-between gap-4" onclick="toggleFaq(this)">
+            <span class="font-medium text-sm" data-i18n="faq_q2">准确率怎么样？</span>
+            <svg class="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer hidden px-5 pb-4 text-sm text-slate-400 leading-relaxed" data-i18n="faq_a2">
+            内部测试显示 Bug 检出率 > 85%，误报率 < 15%。你可以调节敏感度来平衡准确率和召回率。
+          </div>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl">
+          <button class="faq-btn w-full text-left px-5 py-4 flex items-center justify-between gap-4" onclick="toggleFaq(this)">
+            <span class="font-medium text-sm" data-i18n="faq_q3">会替换掉人工 Code Review 吗？</span>
+            <svg class="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer hidden px-5 pb-4 text-sm text-slate-400 leading-relaxed" data-i18n="faq_a3">
+            不会。我们的定位是 AI 初筛 + 人工决策。AI 处理常规问题，人类关注架构、设计和业务逻辑。
+          </div>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl">
+          <button class="faq-btn w-full text-left px-5 py-4 flex items-center justify-between gap-4" onclick="toggleFaq(this)">
+            <span class="font-medium text-sm" data-i18n="faq_q4">支持 GitLab / Bitbucket 吗？</span>
+            <svg class="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer hidden px-5 pb-4 text-sm text-slate-400 leading-relaxed" data-i18n="faq_a4">
+            GitHub 优先，已完整支持。GitLab 正在开发中，预计 2026 Q3 上线。
+          </div>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl">
+          <button class="faq-btn w-full text-left px-5 py-4 flex items-center justify-between gap-4" onclick="toggleFaq(this)">
+            <span class="font-medium text-sm" data-i18n="faq_q5">免费版 50 次 / 月是怎么算的？</span>
+            <svg class="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer hidden px-5 pb-4 text-sm text-slate-400 leading-relaxed" data-i18n="faq_a5">
+            每次 PR 提交触发一次完整 Review 消耗一次额度。50 次 / 月对个人开发者和开源项目通常足够。
+          </div>
+        </div>
+        <div class="bg-slate-900/50 border border-slate-800 rounded-xl">
+          <button class="faq-btn w-full text-left px-5 py-4 flex items-center justify-between gap-4" onclick="toggleFaq(this)">
+            <span class="font-medium text-sm" data-i18n="faq_q6">团队超过 10 人怎么办？</span>
+            <svg class="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer hidden px-5 pb-4 text-sm text-slate-400 leading-relaxed" data-i18n="faq_a6">
+            请联系我们获取定制方案。我们也提供企业版私有部署（2026 Q4 计划中）。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Bottom CTA ─── -->
+  <section class="py-24 px-4" id="install">
+    <div class="max-w-3xl mx-auto text-center space-y-8">
+      <h2 class="text-3xl sm:text-4xl font-bold" data-i18n="bottom_title">不要让 Code Review 成为你的瓶颈</h2>
+      <p class="text-lg text-slate-400" data-i18n="bottom_sub">数千个团队正在用 PRwise 加速他们的开发流程。加入他们。</p>
+      <div class="flex flex-wrap justify-center gap-4">
+        <a href="#install" class="inline-flex items-center gap-2 bg-brand-500 hover:bg-brand-400 text-slate-950 font-semibold px-8 py-3.5 rounded-xl transition-all hover:shadow-xl hover:shadow-brand-500/25 text-base">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span data-i18n="bottom_cta">Install on GitHub — Free</span>
+        </a>
+        <a href="#demo" class="inline-flex items-center gap-2 border border-slate-700 hover:border-slate-500 text-slate-300 font-medium px-8 py-3.5 rounded-xl transition-all text-base"><span data-i18n="bottom_doc">View Documentation</span> →</a>
+      </div>
+      <p class="text-xs text-slate-600" data-i18n="bottom_footnote">No credit card required · 1-minute setup · 7-day free Pro trial</p>
+    </div>
+  </section>
+
+  <!-- ─── Footer ─── -->
+  <footer class="border-t border-slate-800/50 py-12 px-4">
+    <div class="max-w-5xl mx-auto">
+      <div class="grid md:grid-cols-4 gap-8 text-sm">
+        <div class="space-y-3">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 bg-brand-500 rounded-lg flex items-center justify-center text-xs font-bold text-slate-950">P</div>
+            <span class="font-semibold">PRwise</span>
+          </div>
+          <p class="text-slate-500 text-xs" data-i18n="footer_desc">AI-powered Pull Request Review Agent. Built for developers who ship.</p>
+        </div>
+        <div class="space-y-3">
+          <h4 class="font-semibold text-xs uppercase tracking-wider text-slate-400" data-i18n="footer_product">Product</h4>
+          <ul class="space-y-2 text-slate-500">
+            <li><a href="#features" class="hover:text-white transition" data-i18n="footer_features">Features</a></li>
+            <li><a href="#pricing" class="hover:text-white transition" data-i18n="footer_pricing">Pricing</a></li>
+            <li><a href="#demo" class="hover:text-white transition" data-i18n="footer_demo">Demo</a></li>
+          </ul>
+        </div>
+        <div class="space-y-3">
+          <h4 class="font-semibold text-xs uppercase tracking-wider text-slate-400" data-i18n="footer_resources">Resources</h4>
+          <ul class="space-y-2 text-slate-500">
+            <li><a href="#" class="hover:text-white transition" data-i18n="footer_docs">Documentation</a></li>
+            <li><a href="#" class="hover:text-white transition" data-i18n="footer_marketplace">GitHub Marketplace</a></li>
+            <li><a href="#" class="hover:text-white transition" data-i18n="footer_api">API</a></li>
+          </ul>
+        </div>
+        <div class="space-y-3">
+          <h4 class="font-semibold text-xs uppercase tracking-wider text-slate-400" data-i18n="footer_company">Company</h4>
+          <ul class="space-y-2 text-slate-500">
+            <li><a href="#" class="hover:text-white transition" data-i18n="footer_privacy">Privacy Policy</a></li>
+            <li><a href="#" class="hover:text-white transition" data-i18n="footer_terms">Terms of Service</a></li>
+            <li><a href="#" class="hover:text-white transition" data-i18n="footer_contact">Contact</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="mt-10 pt-6 border-t border-slate-800/50 text-center text-xs text-slate-600">
+        <span data-i18n="footer_copyright">&copy; 2026 PRwise. All rights reserved.</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ─── Scripts ─── -->
+  <script>
+    // ─── i18n Translations ───
+    const i18n = {
+      page_title: { zh: 'PRwise — AI Pull Request Review Agent', en: 'PRwise — AI Pull Request Review Agent' },
+      nav_features: { zh: 'Features', en: 'Features' },
+      nav_demo: { zh: 'Demo', en: 'Demo' },
+      nav_pricing: { zh: 'Pricing', en: 'Pricing' },
+      nav_faq: { zh: 'FAQ', en: 'FAQ' },
+      nav_install: { zh: 'Install on GitHub', en: 'Install on GitHub' },
+      hero_badge: { zh: 'Now in Public Beta', en: 'Now in Public Beta' },
+      hero_title_1: { zh: '让你的 PR Review', en: 'Make your PR Review' },
+      hero_title_2: { zh: '从 30 分钟变成 30 秒', en: 'from 30 minutes to 30 seconds' },
+      hero_sub: { zh: 'PRwise 是你代码仓库的 AI Review 搭档。自动检测 bug、安全漏洞、逻辑错误，在同事看到之前就先找到问题。', en: 'PRwise is your AI review partner. Automatically detect bugs, security vulnerabilities, and logic errors before your teammates see them.' },
+      hero_cta_1: { zh: 'Install on GitHub — Free', en: 'Install on GitHub — Free' },
+      hero_cta_2: { zh: 'View Live Demo', en: 'View Live Demo' },
+      hero_footnote: { zh: 'No credit card required · 1-minute setup · Supports JS/TS/Python/Go/Rust', en: 'No credit card required · 1-minute setup · Supports JS/TS/Python/Go/Rust' },
+      mockup_review_found: { zh: 'Review Found', en: 'Review Found' },
+      mockup_item_1: { zh: 'Missing await — fetch() returns Promise', en: 'Missing await — fetch() returns Promise' },
+      mockup_item_2: { zh: 'Missing null check — id could be undefined', en: 'Missing null check — id could be undefined' },
+      mockup_item_3: { zh: 'Suggestion: add validation + await', en: 'Suggestion: add validation + await' },
+      stat_reviews: { zh: 'Pull Requests Reviewed', en: 'Pull Requests Reviewed' },
+      stat_bugs: { zh: 'Bugs Detected', en: 'Bugs Detected' },
+      stat_languages: { zh: 'Languages Supported', en: 'Languages Supported' },
+      stat_time: { zh: 'Avg Review Time', en: 'Avg Review Time' },
+      problem_label: { zh: 'The Problem', en: 'The Problem' },
+      problem_title: { zh: 'Code Review 正在拖慢你的团队', en: 'Code Review is slowing your team down' },
+      problem_1_title: { zh: '速度慢', en: 'Too Slow' },
+      problem_1_desc: { zh: '中型 PR 人工 Review 平均需要 30-60 分钟。等待 Review 成为开发流程中最长的阻塞环节。', en: 'A medium PR takes 30-60 minutes to review manually. Waiting for review is the biggest bottleneck in your dev cycle.' },
+      problem_2_title: { zh: '容易遗漏', en: 'Easy to Miss' },
+      problem_2_desc: { zh: '人眼很难在 500+ 行的 diff 中同时关注逻辑正确性、边界条件、安全漏洞和代码风格。', en: 'Its hard to spot logic errors, edge cases, security issues and style problems across 500+ lines of diff.' },
+      problem_3_title: { zh: '团队瓶颈', en: 'Team Bottleneck' },
+      problem_3_desc: { zh: '核心开发者每天花 2-4 小时 Review 代码，成为团队吞吐量的天花板。', en: 'Senior devs spend 2-4 hours daily on code review, becoming the ceiling for your teams throughput.' },
+      problem_footer: { zh: '现在，AI 可以帮你处理 80% 的常规 Review。人类只需要关注架构和业务逻辑。', en: 'Let AI handle 80% of routine reviews. Humans focus on architecture and business logic.' },
+      how_label: { zh: 'How It Works', en: 'How It Works' },
+      how_title: { zh: 'AI 做初筛，人来决策', en: 'AI screens, humans decide' },
+      how_step_1: { zh: '提交 PR', en: 'Submit a PR' },
+      how_step_1_desc: { zh: '开发者提交 Pull Request 到 GitHub。PRwise 自动被 Webhook 触发。', en: 'Developer pushes a PR to GitHub. PRwise is triggered automatically via Webhook.' },
+      how_step_2: { zh: 'AI 自动审查', en: 'AI Auto-Review' },
+      how_step_2_desc: { zh: 'PRwise 读取 diff、相关文件和上下文，运行多维度 AI 分析。', en: 'PRwise reads the diff, related files and context, then runs multi-dimensional AI analysis.' },
+      how_step_3: { zh: '结果发布', en: 'Results Published' },
+      how_step_3_desc: { zh: 'PR 下方直接显示审查结果。Bug 标记、修改建议、质量评分一目了然。', en: 'Review results appear directly on the PR. Bugs, suggestions, and quality scores at a glance.' },
+      features_label: { zh: 'Features', en: 'Features' },
+      features_title: { zh: '不只是 Lint，而是理解你代码逻辑的 AI', en: 'Not just a linter — AI that understands your code' },
+      feature_1_title: { zh: 'Bug 检测', en: 'Bug Detection' },
+      feature_1_desc: { zh: '自动识别空指针、边界条件遗漏、异步错误、类型不匹配。准确率持续提升。', en: 'Auto-detect null pointers, edge cases, async errors, and type mismatches. Accuracy improves over time.' },
+      feature_2_title: { zh: '安全扫描', en: 'Security Scan' },
+      feature_2_desc: { zh: '检测密钥泄露、SQL 注入、XSS 漏洞、不安全的依赖版本。内置安全引擎。', en: 'Detect leaked secrets, SQL injection, XSS, and vulnerable dependencies. Built-in security engine.' },
+      feature_3_title: { zh: '质量评分', en: 'Quality Score' },
+      feature_3_desc: { zh: '每个文件的复杂度、可维护性、测试覆盖度评分。追踪 PR 间质量趋势。', en: 'Complexity, maintainability, and test coverage scores per file. Track quality trends across PRs.' },
+      feature_4_title: { zh: '增量审查', en: 'Incremental Review' },
+      feature_4_desc: { zh: '只分析变更代码，不重复检查未改动部分。大项目中也能 30 秒内返回。', en: 'Only analyze changed code. No re-checking untouched files. Results in under 30s even for large projects.' },
+      feature_5_title: { zh: '自定义规则', en: 'Custom Rules' },
+      feature_5_desc: { zh: '配置团队编码规范。支持 ESLint 规则导入、自定义正则、命名约定。', en: 'Configure your teams coding standards. Import ESLint rules, custom regexes, and naming conventions.' },
+      feature_6_title: { zh: 'CI 深度集成', en: 'CI Integration' },
+      feature_6_desc: { zh: '通过 GitHub Actions 接入。PR 不通过审查可以阻止合并，保护主分支。', en: 'Integrate via GitHub Actions. Block PRs from merging if review fails. Protect your main branch.' },
+      setup_label: { zh: 'Setup', en: 'Setup' },
+      setup_title: { zh: '3 分钟接入你的仓库', en: 'Connect your repo in 3 minutes' },
+      setup_sub: { zh: '不需要 YAML 配置，不需要 API Key，安装即用。', en: 'No YAML config needed. No API key required. Install and go.' },
+      setup_step_1_label: { zh: 'Step 1', en: 'Step 1' },
+      setup_step_1_title: { zh: 'Install from GitHub Marketplace', en: 'Install from GitHub Marketplace' },
+      setup_step_1_desc: { zh: '点击按钮，选择你的仓库，授权安装。整个过程不到 1 分钟。', en: 'Click the button, select your repos, authorize. Takes under a minute.' },
+      setup_step_2_label: { zh: 'Step 2', en: 'Step 2' },
+      setup_step_2_title: { zh: 'Configure Rules (Optional)', en: 'Configure Rules (Optional)' },
+      setup_step_2_desc: { zh: '默认配置即可用。你也可以自定义审查粒度、忽略特定目录、设置规则。', en: 'Defaults work out of the box. Customize review depth, ignore paths, or set rules.' },
+      setup_step_3_label: { zh: 'Step 3', en: 'Step 3' },
+      setup_step_3_title: { zh: 'Submit a PR — Auto Reviewed', en: 'Submit a PR — Auto Reviewed' },
+      setup_step_3_desc: { zh: '提交 PR，30 秒内 AI 自动返回审查结果。一切自动完成。', en: 'Submit a PR. AI returns review results in under 30 seconds. Fully automatic.' },
+      demo_label: { zh: 'Live Example', en: 'Live Example' },
+      demo_title: { zh: '看它如何工作', en: 'See it in action' },
+      demo_review_results: { zh: 'Review Results', en: 'Review Results' },
+      demo_finding_1_title: { zh: 'Missing await', en: 'Missing await' },
+      demo_finding_1_desc: { zh: 'fetch() returns a Promise. Without await, the function returns a Promise instead of the actual data.', en: 'fetch() returns a Promise. Without await, the function returns a Promise instead of the actual data.' },
+      demo_finding_2_title: { zh: 'Missing null check', en: 'Missing null check' },
+      demo_finding_2_desc: { zh: 'id parameter could be null or undefined. Add validation before using it in the fetch URL.', en: 'id parameter could be null or undefined. Add validation before using it in the fetch URL.' },
+      demo_finding_3_title: { zh: 'Suggestion: Add type annotation', en: 'Suggestion: Add type annotation' },
+      demo_finding_3_desc: { zh: 'function getUser(id: string): Promise<User> would improve type safety.', en: 'function getUser(id: string): Promise<User> would improve type safety.' },
+      trust_title: { zh: '支持 15+ 编程语言', en: '15+ programming languages supported' },
+      trust_sub: { zh: '覆盖主流技术栈，持续扩展中', en: 'Covers major tech stacks, more coming' },
+      trust_oss_1: { zh: '开源项目 ', en: 'Open source projects are ' },
+      trust_oss_2: { zh: '永久免费', en: 'free forever' },
+      trust_oss_3: { zh: '。我们相信好的工具应该回馈社区。', en: '. Good tools should give back to the community.' },
+      pricing_label: { zh: 'Pricing', en: 'Pricing' },
+      pricing_title: { zh: '简单透明的定价', en: 'Simple, transparent pricing' },
+      pricing_sub: { zh: '7 天免费试用 Pro 版，无需信用卡。', en: '7-day free trial of Pro. No credit card required.' },
+      pricing_free_name: { zh: 'Free', en: 'Free' },
+      pricing_pro_name: { zh: 'Pro', en: 'Pro' },
+      pricing_team_name: { zh: 'Team', en: 'Team' },
+      pricing_free_desc: { zh: '适合个人开发者', en: 'For solo developers' },
+      pricing_free_1: { zh: '50 次 Review / 月', en: '50 reviews / month' },
+      pricing_free_2: { zh: '公开仓库', en: 'Public repos' },
+      pricing_free_3: { zh: '基础 Bug 检测', en: 'Basic bug detection' },
+      pricing_free_cta: { zh: 'Install Free', en: 'Install Free' },
+      pricing_pro_badge: { zh: 'Most Popular', en: 'Most Popular' },
+      pricing_per_month: { zh: '/月', en: '/mo' },
+      pricing_pro_desc: { zh: '适合小团队（2-10人）', en: 'For small teams (2-10)' },
+      pricing_pro_unlimited: { zh: '无限', en: 'Unlimited' },
+      pricing_pro_1: { zh: 'Review', en: 'Reviews' },
+      pricing_pro_2: { zh: '公开 + 私有仓库', en: 'Public & private repos' },
+      pricing_pro_3: { zh: 'GitHub Actions 集成', en: 'GitHub Actions' },
+      pricing_pro_4: { zh: '自定义规则', en: 'Custom rules' },
+      pricing_pro_5: { zh: '3 个席位', en: '3 seats' },
+      pricing_pro_cta: { zh: 'Start Free Trial', en: 'Start Free Trial' },
+      pricing_pro_note: { zh: 'No credit card required', en: 'No credit card required' },
+      pricing_team_desc: { zh: '适合中型团队（10-50人）', en: 'For mid-size teams (10-50)' },
+      pricing_team_1: { zh: '全部 Pro 功能', en: 'All Pro features' },
+      pricing_team_2: { zh: '10 个席位', en: '10 seats' },
+      pricing_team_3: { zh: 'SSO / SAML', en: 'SSO / SAML' },
+      pricing_team_4: { zh: 'GitLab / Bitbucket', en: 'GitLab / Bitbucket' },
+      pricing_team_5: { zh: '优先支持', en: 'Priority support' },
+      pricing_team_cta: { zh: 'Contact Us', en: 'Contact Us' },
+      faq_label: { zh: 'FAQ', en: 'FAQ' },
+      faq_title: { zh: '常见问题', en: 'Frequently Asked Questions' },
+      faq_q1: { zh: '我的代码会被用来训练模型吗？', en: 'Will my code be used to train models?' },
+      faq_a1: { zh: '不会。我们仅使用 LLM API 进行推理，不会将你的代码用于训练。代码通过 TLS 加密传输，不留存在我们服务器上。', en: 'No. We only use LLM APIs for inference. Your code is never used for training. Transmitted via TLS, not stored on our servers.' },
+      faq_q2: { zh: '准确率怎么样？', en: 'How accurate is it?' },
+      faq_a2: { zh: '内部测试显示 Bug 检出率 > 85%，误报率 < 15%。你可以调节敏感度来平衡准确率和召回率。', en: 'Internal testing shows >85% bug detection rate with <15% false positives. Adjust sensitivity to balance precision and recall.' },
+      faq_q3: { zh: '会替换掉人工 Code Review 吗？', en: 'Will it replace human code review?' },
+      faq_a3: { zh: '不会。我们的定位是 AI 初筛 + 人工决策。AI 处理常规问题，人类关注架构、设计和业务逻辑。', en: 'No. AI screens + humans decide. AI handles routine issues, humans focus on architecture, design, and business logic.' },
+      faq_q4: { zh: '支持 GitLab / Bitbucket 吗？', en: 'Does it support GitLab / Bitbucket?' },
+      faq_a4: { zh: 'GitHub 优先，已完整支持。GitLab 正在开发中，预计 2026 Q3 上线。', en: 'GitHub first, fully supported. GitLab in development, expected Q3 2026.' },
+      faq_q5: { zh: '免费版 50 次 / 月是怎么算的？', en: 'How is the free tier 50/month counted?' },
+      faq_a5: { zh: '每次 PR 提交触发一次完整 Review 消耗一次额度。50 次 / 月对个人开发者和开源项目通常足够。', en: 'Each PR submitted triggers one review. 50/month is usually enough for solo devs and open source.' },
+      faq_q6: { zh: '团队超过 10 人怎么办？', en: 'What if my team has more than 10 people?' },
+      faq_a6: { zh: '请联系我们获取定制方案。我们也提供企业版私有部署（2026 Q4 计划中）。', en: 'Contact us for custom plans. Enterprise self-hosted coming Q4 2026.' },
+      bottom_title: { zh: '不要让 Code Review 成为你的瓶颈', en: "Don't let code review be your bottleneck" },
+      bottom_sub: { zh: '数千个团队正在用 PRwise 加速他们的开发流程。加入他们。', en: 'Thousands of teams use PRwise to accelerate development. Join them.' },
+      bottom_cta: { zh: 'Install on GitHub — Free', en: 'Install on GitHub — Free' },
+      bottom_doc: { zh: 'View Documentation', en: 'View Documentation' },
+      bottom_footnote: { zh: 'No credit card required · 1-minute setup · 7-day free Pro trial', en: 'No credit card required · 1-minute setup · 7-day free Pro trial' },
+      footer_desc: { zh: 'AI-powered Pull Request Review Agent. Built for developers who ship.', en: 'AI-powered Pull Request Review Agent. Built for developers who ship.' },
+      footer_product: { zh: 'Product', en: 'Product' },
+      footer_features: { zh: 'Features', en: 'Features' },
+      footer_pricing: { zh: 'Pricing', en: 'Pricing' },
+      footer_demo: { zh: 'Demo', en: 'Demo' },
+      footer_resources: { zh: 'Resources', en: 'Resources' },
+      footer_docs: { zh: 'Documentation', en: 'Documentation' },
+      footer_company: { zh: 'Company', en: 'Company' },
+      footer_privacy: { zh: 'Privacy Policy', en: 'Privacy Policy' },
+      footer_terms: { zh: 'Terms of Service', en: 'Terms of Service' },
+      footer_contact: { zh: 'Contact', en: 'Contact' },
+      footer_marketplace: { zh: 'GitHub Marketplace', en: 'GitHub Marketplace' },
+      footer_api: { zh: 'API', en: 'API' },
+      footer_copyright: { zh: '\u00a9 2026 PRwise. All rights reserved.', en: '\u00a9 2026 PRwise. All rights reserved.' },
+    };
+
+    let currentLang = localStorage.getItem('prwise_lang') || 'zh';
+
+    function applyLang(lang) {
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (i18n[key] && i18n[key][lang]) {
+          el.textContent = i18n[key][lang];
+        }
+      });
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.getElementById('langLabel').textContent = lang === 'zh' ? 'EN' : '中文';
+      currentLang = lang;
+      localStorage.setItem('prwise_lang', lang);
+    }
+
+    function switchLang() {
+      applyLang(currentLang === 'zh' ? 'en' : 'zh');
+    }
+
+    // Apply saved language on load
+    applyLang(currentLang);
+
+    // Scroll animation
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('show');
+        }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
+
+    // Counter animation
+    function animateCounter(el, target) {
+      const step = Math.max(1, Math.floor(target / 60));
+      let current = 0;
+      const increment = () => {
+        current += step;
+        if (current >= target) { el.textContent = target; return; }
+        el.textContent = current;
+        requestAnimationFrame(() => setTimeout(increment, 30));
+      };
+      increment();
+    }
+    const counterObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const el = entry.target;
+          const target = parseInt(el.dataset.target);
+          if (!el.dataset.animated) {
+            el.dataset.animated = 'true';
+            animateCounter(el, target);
+          }
+        }
+      });
+    }, { threshold: 0.5 });
+    document.querySelectorAll('.counter').forEach(el => counterObserver.observe(el));
+
+    // FAQ toggle
+    function toggleFaq(btn) {
+      const answer = btn.nextElementSibling;
+      const icon = btn.querySelector('svg');
+      const isOpen = !answer.classList.contains('hidden');
+      answer.classList.toggle('hidden');
+      icon.classList.toggle('rotate-180');
+    }
+  </script>
+</body>
+</html>
