@@ -47,8 +47,13 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Repository not found' }, { status: 404 });
   }
 
+  const reviewIds = await prisma.review.findMany({
+    where: { repositoryId: id },
+    select: { id: true },
+  }).then((rows) => rows.map((r) => r.id));
+
   await prisma.$transaction([
-    prisma.finding.deleteMany({ where: { review: { repositoryId: id } } }),
+    prisma.finding.deleteMany({ where: { reviewId: { in: reviewIds } } }),
     prisma.review.deleteMany({ where: { repositoryId: id } }),
     prisma.repository.delete({ where: { id } }),
   ]);
