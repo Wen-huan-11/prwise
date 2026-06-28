@@ -32,6 +32,7 @@ export const authOptions: AuthOptions = {
           });
         } catch (err) {
           console.error(`[auth] Failed to upsert user ${p.login} (githubId=${p.id}):`, err instanceof Error ? err.message : String(err));
+          return false;
         }
       }
       return true;
