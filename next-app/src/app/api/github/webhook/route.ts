@@ -110,32 +110,37 @@ export async function POST(request: Request) {
       logger(`Bot sender detected, falling back to repo owner: ${sender.login}`);
     }
 
-    // ── 1. Find or create user ──
-    let user = await prisma.user.findUnique({
+    // ── 1. Find or create user (upsert handles race conditions) ──
+    const user = await prisma.user.upsert({
       where: { githubId: sender.id },
+      update: {
+        login: sender.login,
+        name: sender.login,
+        avatarUrl: sender.avatar_url ?? '',
+      },
+      create: {
+        githubId: sender.id,
+        login: sender.login,
+        name: sender.login,
+        email: '',
+        avatarUrl: sender.avatar_url ?? '',
+      },
     });
 
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          githubId: sender.id,
-          login: sender.login,
-          name: sender.login,
-          email: '',
-          avatarUrl: sender.avatar_url ?? '',
-        },
-      });
-      logger(`Created user ${sender.login}`);
-    }
-
     // ── 2. Find or create repository ──
+    // Fast path: look up by fullName (same repo always has same fullName)
     let repository = await prisma.repository.findFirst({
       where: { fullName: data.repository.full_name },
     });
 
     if (!repository) {
-      repository = await prisma.repository.create({
-        data: {
+      // Upsert by githubId to safely handle:
+      // - Race condition (two concurrent webhooks for the same new repo)
+      // - Re-creation after deletion (first user deleted, second user triggers)
+      repository = await prisma.repository.upsert({
+        where: { githubId: data.repository.id },
+        update: { fullName: data.repository.full_name, userId: user.id },
+        create: {
           githubId: data.repository.id,
           name: repo,
           fullName: data.repository.full_name,
@@ -144,7 +149,7 @@ export async function POST(request: Request) {
           userId: user.id,
         },
       });
-      logger(`Created repository ${data.repository.full_name}`);
+      logger(`Created/claimed repository ${data.repository.full_name}`);
     }
 
     // ── 3. Check for existing review (idempotency for webhook retries) ──
