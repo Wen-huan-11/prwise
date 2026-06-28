@@ -33,8 +33,8 @@ export const authOptions: AuthOptions = {
       return true;
     },
     async session({ session, token }) {
-      if (session.user) {
-        (session.user as { id: string }).id = token.sub as string;
+      if (session.user && token.sub) {
+        (session.user as { id: string }).id = token.sub;
       }
       return session;
     },

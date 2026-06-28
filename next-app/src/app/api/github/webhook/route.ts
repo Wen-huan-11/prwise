@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createHmac } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { fetchPullRequestDiff, postPRReviewComment } from '@/lib/github';
 import { reviewDiff, ReviewResult } from '@/lib/ai';
@@ -7,9 +8,19 @@ function verifySignature(payload: string, signature: string | null, secret: stri
   if (!signature) return false;
   const algo = signature.startsWith('sha256=') ? 'sha256' : 'sha1';
   const expected = algo === 'sha256' ? 'sha256=' : 'sha1=';
-  const { createHmac } = require('crypto');
   const hmac = createHmac(algo, secret).update(payload).digest('hex');
   return signature === expected + hmac;
+}
+
+function logger(message: string, data?: unknown) {
+  if (process.env.NODE_ENV !== 'production') {
+    const ts = new Date().toISOString();
+    if (data) {
+      console.log(`[webhook] ${ts} ${message}`, data);
+    } else {
+      console.log(`[webhook] ${ts} ${message}`);
+    }
+  }
 }
 
 /**
@@ -65,12 +76,18 @@ export async function POST(request: Request) {
 
     if (action === 'opened' || action === 'synchronize') {
       const [owner, repo] = data.repository.full_name.split('/');
-      const sender = data.sender;
+      let sender = data.sender;
 
-      console.log(`PR #${pr.number} ${action} in ${data.repository.full_name}`);
+      logger(`PR #${pr.number} ${action} in ${data.repository.full_name}`);
 
       try {
-        // ── 1. Find or create user (the person who triggered the PR event) ──
+        // ── 0. Handle bot-triggered events (GitHub Actions, etc.) ──
+        if (sender.type === 'Bot') {
+          sender = data.repository.owner;
+          logger(`Bot sender detected, falling back to repo owner: ${sender.login}`);
+        }
+
+        // ── 1. Find or create user ──
         let user = await prisma.user.findUnique({
           where: { githubId: sender.id },
         });
@@ -85,7 +102,7 @@ export async function POST(request: Request) {
               avatarUrl: sender.avatar_url ?? '',
             },
           });
-          console.log(`Created user ${sender.login} (id=${user.id})`);
+          logger(`Created user ${sender.login}`);
         }
 
         // ── 2. Find or create repository ──
@@ -104,7 +121,7 @@ export async function POST(request: Request) {
               userId: user.id,
             },
           });
-          console.log(`Created repository ${data.repository.full_name}`);
+          logger(`Created repository ${data.repository.full_name}`);
         }
 
         // ── 3. Create Review record ──
@@ -117,17 +134,17 @@ export async function POST(request: Request) {
             userId: user.id,
           },
         });
-        console.log(`Created review ${review.id} for PR #${pr.number}`);
+        logger(`Created review for PR #${pr.number}`);
 
         // ── 4. Fetch diff and run AI review ──
         const diff = await fetchPullRequestDiff(owner, repo, pr.number);
-        console.log(`Fetched diff for PR #${pr.number}: ${diff.length} bytes`);
+        logger(`Fetched diff for PR #${pr.number}: ${diff.length} bytes`);
 
         const result = await reviewDiff(diff);
-        console.log(`AI review completed: ${result.findings.length} findings, score=${result.qualityScore}`);
+        logger(`AI review completed: ${result.findings.length} findings, score=${result.qualityScore}`);
 
         // ── 5. Save findings to database ──
-        await Promise.all(
+        const findings = await Promise.all(
           result.findings.map((f) =>
             prisma.finding.create({
               data: {
@@ -144,27 +161,27 @@ export async function POST(request: Request) {
           )
         );
 
-        // ── 6. Update review status ──
+        // ── 6. Post review results to GitHub PR BEFORE marking complete ──
+        const commentBody = formatReviewComment(result, pr.title);
+        await postPRReviewComment(owner, repo, pr.number, commentBody);
+        logger(`Posted review comment to PR #${pr.number}`);
+
+        // ── 7. Only now mark review as COMPLETED ──
         await prisma.review.update({
           where: { id: review.id },
           data: {
             status: 'COMPLETED',
             diffUrl: `https://github.com/${owner}/${repo}/pull/${pr.number}.diff`,
             qualityScore: result.qualityScore,
-            findingsCount: result.findings.length,
+            findingsCount: findings.length,
             completedAt: new Date(),
           },
         });
 
-        // ── 7. Post review results back to GitHub PR ──
-        const commentBody = formatReviewComment(result, pr.title);
-        await postPRReviewComment(owner, repo, pr.number, commentBody);
-        console.log(`Posted review comment to PR #${pr.number}`);
-
       } catch (err) {
-        console.error(`Failed to process PR #${pr.number}:`, err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger(`Failed to process PR #${pr.number}: ${errMsg}`);
 
-        // Mark review as failed if it was created
         try {
           const failedReview = await prisma.review.findFirst({
             where: {
@@ -180,7 +197,7 @@ export async function POST(request: Request) {
             });
           }
         } catch (dbErr) {
-          console.error('Failed to update review status to FAILED:', dbErr);
+          logger(`Failed to update review status to FAILED: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
         }
       }
     }

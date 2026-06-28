@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { parseGithubId } from '@/lib/utils';
 
 async function getCurrentUser() {
   const session = await getServerSession(authOptions);
-  const userId = (session?.user as { id?: string } | undefined)?.id;
-  if (!userId) return null;
-  return prisma.user.findUnique({ where: { githubId: parseInt(userId, 10) } });
+  const githubId = parseGithubId((session?.user as { id?: string } | undefined)?.id);
+  if (!githubId) return null;
+  return prisma.user.findUnique({ where: { githubId } });
 }
 
 export async function GET() {
@@ -46,6 +47,10 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Repository not found' }, { status: 404 });
   }
 
-  await prisma.repository.delete({ where: { id } });
+  await prisma.$transaction([
+    prisma.finding.deleteMany({ where: { review: { repositoryId: id } } }),
+    prisma.review.deleteMany({ where: { repositoryId: id } }),
+    prisma.repository.delete({ where: { id } }),
+  ]);
   return NextResponse.json({ ok: true });
 }

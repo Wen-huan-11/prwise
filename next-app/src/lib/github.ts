@@ -1,16 +1,21 @@
+import { getRequiredEnv, fetchWithTimeout } from './utils';
+
 export async function fetchPullRequestDiff(
   owner: string,
   repo: string,
   pullNumber: number
 ): Promise<string> {
-  const token = process.env.GITHUB_TOKEN!;
+  const token = getRequiredEnv('GITHUB_TOKEN');
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.diff' } }
+    {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.diff' },
+      timeout: 30000,
+    }
   );
 
-  if (!res.ok) throw new Error(`Failed to fetch PR diff: ${res.status}`);
+  if (!res.ok) throw new Error(`Failed to fetch PR diff (HTTP ${res.status}) for ${owner}/${repo}#${pullNumber}`);
   return res.text();
 }
 
@@ -24,9 +29,9 @@ export async function postPRReviewComment(
   pullNumber: number,
   body: string
 ): Promise<void> {
-  const token = process.env.GITHUB_TOKEN!;
+  const token = getRequiredEnv('GITHUB_TOKEN');
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.github.com/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
     {
       method: 'POST',
@@ -36,15 +41,13 @@ export async function postPRReviewComment(
         'Content-Type': 'application/json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
-      body: JSON.stringify({
-        body,
-        event: 'COMMENT',
-      }),
+      body: JSON.stringify({ body, event: 'COMMENT' }),
+      timeout: 15000,
     }
   );
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Failed to post PR review comment: ${res.status} - ${errText}`);
+    throw new Error(`Failed to post PR review comment (HTTP ${res.status}) for ${owner}/${repo}#${pullNumber}: ${errText}`);
   }
 }

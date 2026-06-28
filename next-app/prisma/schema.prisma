@@ -77,6 +77,8 @@ model Review {
   user      User       @relation(fields: [userId], references: [id])
 
   findings Finding[]
+
+  @@unique([prNumber, repositoryId])
 }
 
 model Finding {

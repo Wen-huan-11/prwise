@@ -82,19 +82,54 @@ export default function DashboardPage() {
     }
   }, [status, router]);
 
+  const [errors, setErrors] = useState<{ stats?: string; reviews?: string; repos?: string }>({});
+
   useEffect(() => {
     if (status !== 'authenticated') return;
 
-    Promise.all([
-      fetch('/api/stats').then((r) => r.json()).catch(() => null),
-      fetch('/api/reviews').then((r) => r.json()).catch(() => []),
-      fetch('/api/repositories').then((r) => r.json()).catch(() => []),
-    ]).then(([s, r, repos]) => {
-      setStats(s);
-      setReviews(Array.isArray(r) ? r : []);
-      setRepos(Array.isArray(repos) ? repos : []);
+    let cancelled = false;
+
+    const load = async () => {
+      const errs: typeof errors = {};
+
+      const [statsRes, reviewsRes, reposRes] = await Promise.allSettled([
+        fetch('/api/stats'),
+        fetch('/api/reviews'),
+        fetch('/api/repositories'),
+      ]);
+
+      if (cancelled) return;
+
+      if (statsRes.status === 'fulfilled') {
+        const data = await statsRes.value.json();
+        setStats(data.error ? null : data);
+        if (data.error) errs.stats = data.error;
+      } else {
+        errs.stats = '统计数据加载失败';
+      }
+
+      if (reviewsRes.status === 'fulfilled') {
+        const data = await reviewsRes.value.json();
+        setReviews(Array.isArray(data) ? data : []);
+        if (!Array.isArray(data)) errs.reviews = data.error || '审查历史加载失败';
+      } else {
+        errs.reviews = '审查历史加载失败';
+      }
+
+      if (reposRes.status === 'fulfilled') {
+        const data = await reposRes.value.json();
+        setRepos(Array.isArray(data) ? data : []);
+        if (!Array.isArray(data)) errs.repos = data.error || '仓库列表加载失败';
+      } else {
+        errs.repos = '仓库列表加载失败';
+      }
+
+      setErrors(errs);
       setLoading(false);
-    });
+    };
+
+    load();
+    return () => { cancelled = true; };
   }, [status, reviewResult]);
 
   const startReview = async () => {
@@ -172,6 +207,15 @@ export default function DashboardPage() {
             &larr; 返回首页
           </Link>
         </div>
+
+        {/* Error banners */}
+        {Object.entries(errors).map(([key, msg]) =>
+          msg ? (
+            <div key={key} className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-300">
+              {msg}
+            </div>
+          ) : null
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

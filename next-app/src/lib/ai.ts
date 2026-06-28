@@ -1,3 +1,5 @@
+import { getRequiredEnv, fetchWithTimeout } from './utils';
+
 const DEEPSEEK_BASE = 'https://api.deepseek.com/v1';
 
 interface FindingInput {
@@ -15,6 +17,8 @@ export interface ReviewResult {
   summary: string;
   findings: FindingInput[];
 }
+
+const MAX_DIFF_CHARS = 30000;
 
 function buildSystemPrompt(isSnippet: boolean, lang: string): string {
   const base = `You are an expert code reviewer. Analyze the provided code and identify bugs, security vulnerabilities, logic errors, and code quality issues.
@@ -54,13 +58,42 @@ Respond with valid JSON only, no markdown. Format:
   return base + extra;
 }
 
+function parseJsonFromLLM(content: string): ReviewResult {
+  content = content.trim();
+
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error('AI response contains no valid JSON object');
+  }
+
+  let raw = jsonMatch[0];
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    raw = raw
+      .replace(/,\s*}/g, '}')
+      .replace(/,\s*\]/g, ']')
+      .replace(/(['"])?([a-zA-Z_]\w*)(['"])?\s*:/g, '"$2":');
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error('Failed to parse AI review result as JSON after recovery attempt');
+    }
+  }
+}
+
 export async function reviewDiff(diff: string, isSnippet = false, lang = 'zh'): Promise<ReviewResult> {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const apiKey = getRequiredEnv('DEEPSEEK_API_KEY');
   const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
 
   const label = isSnippet ? 'code snippet' : 'diff';
 
-  const res = await fetch(`${DEEPSEEK_BASE}/chat/completions`, {
+  if (diff.length > MAX_DIFF_CHARS) {
+    diff = diff.slice(0, MAX_DIFF_CHARS) + '\n\n... [truncated due to size]';
+  }
+
+  const res = await fetchWithTimeout(`${DEEPSEEK_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -75,22 +108,18 @@ export async function reviewDiff(diff: string, isSnippet = false, lang = 'zh'): 
       max_tokens: 4096,
       temperature: 0.1,
     }),
+    timeout: 60000,
   });
 
   if (!res.ok) throw new Error(`DeepSeek API error: ${res.status}`);
 
   const data = await res.json();
-  let content: string;
 
-  if (data.choices?.[0]?.message?.content) {
-    content = data.choices[0].message.content;
-  } else {
-    throw new Error('Unexpected DeepSeek response format');
+  if (!data.choices?.[0]?.message?.content) {
+    throw new Error('Unexpected DeepSeek response format: missing choices[0].message.content');
   }
 
-  content = content.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
-
-  const parsed: ReviewResult = JSON.parse(content);
+  const parsed = parseJsonFromLLM(data.choices[0].message.content);
 
   return {
     qualityScore: parsed.qualityScore ?? 0,

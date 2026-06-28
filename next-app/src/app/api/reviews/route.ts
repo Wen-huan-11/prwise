@@ -4,21 +4,21 @@ import { authOptions } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { fetchPullRequestDiff } from '@/lib/github';
 import { reviewDiff } from '@/lib/ai';
+import { parseGithubId, getRequiredEnv, fetchWithTimeout } from '@/lib/utils';
 
 const PR_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)$/;
 
-export async function GET() {
+async function getSessionUser() {
   const session = await getServerSession(authOptions);
-  const userId = (session?.user as { id?: string } | undefined)?.id;
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const githubId = parseGithubId((session?.user as { id?: string } | undefined)?.id);
+  if (!githubId) return null;
+  return prisma.user.findUnique({ where: { githubId } });
+}
 
-  const user = await prisma.user.findUnique({
-    where: { githubId: parseInt(userId, 10) },
-  });
+export async function GET() {
+  const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const reviews = await prisma.review.findMany({
@@ -56,9 +56,8 @@ export async function POST(request: Request) {
   }
 
   // ── PR URL mode (requires login) ──
-  const session = await getServerSession(authOptions);
-  const userId = (session?.user as { id?: string } | undefined)?.id;
-  if (!userId) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -79,9 +78,27 @@ export async function POST(request: Request) {
   const [, owner, repo, pullNumberStr] = match;
   const pullNumber = parseInt(pullNumberStr, 10);
 
-  const user = await prisma.user.findUnique({ where: { githubId: parseInt(userId, 10) } });
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  // ── Check review quota ──
+  if (user.reviewsUsed >= user.reviewsLimit) {
+    return NextResponse.json(
+      { error: `Monthly review limit reached (${user.reviewsLimit}). Upgrade to Pro for unlimited reviews.` },
+      { status: 403 }
+    );
+  }
+
+  // ── Check for duplicate PR review ──
+  const existing = await prisma.review.findFirst({
+    where: {
+      prNumber: pullNumber,
+      repository: { fullName: `${owner}/${repo}` },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (existing && existing.status === 'COMPLETED') {
+    return NextResponse.json(
+      { error: `PR #${pullNumber} has already been reviewed.`, reviewId: existing.id },
+      { status: 409 }
+    );
   }
 
   let repository = await prisma.repository.findFirst({
@@ -89,9 +106,13 @@ export async function POST(request: Request) {
   });
 
   if (!repository) {
-    const repoRes = await fetch(
+    const githubToken = getRequiredEnv('GITHUB_TOKEN');
+    const repoRes = await fetchWithTimeout(
       `https://api.github.com/repos/${owner}/${repo}`,
-      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN!}` } }
+      {
+        headers: { Authorization: `Bearer ${githubToken}` },
+        timeout: 15000,
+      }
     );
     if (!repoRes.ok) {
       return NextResponse.json({ error: 'Repository not found on GitHub' }, { status: 404 });
@@ -109,6 +130,12 @@ export async function POST(request: Request) {
       },
     });
   }
+
+  // ── Increment usage ──
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { reviewsUsed: { increment: 1 } },
+  });
 
   const review = await prisma.review.create({
     data: {
@@ -164,6 +191,12 @@ export async function POST(request: Request) {
       findings: result.findings,
     });
   } catch (err) {
+    // Rollback the usage increment on failure
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { reviewsUsed: { decrement: 1 } },
+    });
+
     await prisma.review.update({
       where: { id: review.id },
       data: { status: 'FAILED' },
