@@ -150,6 +150,8 @@ export async function POST(request: Request) {
     }),
   ]);
 
+  let completed = false;
+
   try {
     const diff = await fetchPullRequestDiff(owner, repo, pullNumber);
 
@@ -182,6 +184,7 @@ export async function POST(request: Request) {
         completedAt: new Date(),
       },
     });
+    completed = true;
 
     return NextResponse.json({
       reviewId: review.id,
@@ -194,16 +197,19 @@ export async function POST(request: Request) {
       findings: result.findings,
     });
   } catch (err) {
-    // Rollback the usage increment on failure
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { reviewsUsed: { decrement: 1 } },
-    });
+    // Only rollback quota if review did not actually complete
+    if (!completed) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { reviewsUsed: { decrement: 1 } },
+      });
+    }
 
     await prisma.review.update({
       where: { id: review.id },
-      data: { status: 'FAILED' },
+      data: { status: completed ? 'COMPLETED' : 'FAILED' },
     });
+
     return NextResponse.json({
       error: err instanceof Error ? err.message : 'Review failed',
       reviewId: review.id,
